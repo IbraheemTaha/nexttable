@@ -9,6 +9,7 @@ from .models import (
     WaitlistEntry,
     WorkerProfile,
 )
+from .services import calculate_estimated_wait_minutes
 
 
 LOCATION_PREFERENCE_CHOICES = (
@@ -315,9 +316,13 @@ class GuestCheckInForm(forms.Form):
                 label = self.fields[field_name].label
                 preference_parts.append(f'{label}: {value}')
 
+        party_size = self.cleaned_data['party_size']
+        estimated_wait_minutes = calculate_estimated_wait_minutes(party_size)
+
         return WaitlistEntry.objects.create(
             guest_name=self.cleaned_data['guest_name'],
-            party_size=self.cleaned_data['party_size'],
+            party_size=party_size,
             contact_text=self.cleaned_data.get('phone_number', ''),
             preference_notes='\n'.join(preference_parts),
+            estimated_wait_minutes=estimated_wait_minutes,
         )
