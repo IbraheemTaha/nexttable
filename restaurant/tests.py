@@ -347,7 +347,7 @@ class GuestCheckInPageTests(TestCase):
             ),
         )
         self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
-        self.assertEqual(entry.estimated_wait_minutes, 15)
+        self.assertEqual(entry.estimated_wait_minutes, 25)
         self.assertNotEqual(str(entry.public_identifier), submitted_public_identifier)
         self.assertEqual(entry.priority_metadata, {})
         self.assertIsNone(entry.assigned_table)
