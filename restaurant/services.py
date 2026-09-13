@@ -7,7 +7,9 @@ to support unit testing and reusability.
 """
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from .models import EtaRule, RestaurantTable, WaitlistEntry
 
@@ -115,6 +117,49 @@ def select_next_guest_for_table(table):
             best_entry = entry
 
     return best_entry
+
+
+def match_table_automatically(table):
+    """Automatically assign the best waiting guest to a newly-free table.
+
+    Uses `select_next_guest_for_table` to find the highest-priority
+    compatible waiting guest for the given table. If a match is found,
+    the guest is assigned to the table and notified, and the table is
+    marked reserved. If no compatible guest exists, or the table is not
+    currently free, nothing is mutated.
+
+    Args:
+        table: RestaurantTable instance to match a guest to.
+
+    Returns:
+        The matched WaitlistEntry if a guest was assigned, or None if
+        no match was made.
+
+    Raises:
+        TypeError: If table is not a RestaurantTable instance.
+    """
+    if not isinstance(table, RestaurantTable):
+        raise TypeError('table must be a RestaurantTable instance')
+
+    if table.status != RestaurantTable.Status.FREE:
+        return None
+
+    matched_entry = select_next_guest_for_table(table)
+    if matched_entry is None:
+        return None
+
+    with transaction.atomic():
+        matched_entry.assigned_table = table
+        matched_entry.status = WaitlistEntry.Status.NOTIFIED
+        matched_entry.notified_at = timezone.now()
+        matched_entry.save(
+            update_fields=['assigned_table', 'status', 'notified_at', 'updated_at']
+        )
+
+        table.status = RestaurantTable.Status.RESERVED
+        table.save(update_fields=['status', 'updated_at'])
+
+    return matched_entry
 
 
 def _guest_needs_accessibility(waitlist_entry):

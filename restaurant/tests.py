@@ -26,6 +26,7 @@ from .models import (
 from .services import (
     calculate_estimated_wait_minutes,
     check_table_compatibility,
+    match_table_automatically,
     select_next_guest_for_table,
 )
 
@@ -2757,3 +2758,121 @@ class SelectNextGuestForTableTests(TestCase):
         self.assertEqual(entry.assigned_table, original_assigned_table)
         self.assertIsNone(entry.assigned_table)
         self.assertEqual(self.table.status, original_table_status)
+
+
+class MatchTableAutomaticallyTests(TestCase):
+    """Tests for the match_table_automatically service function."""
+
+    def setUp(self):
+        """Set up a clean table and waitlist state for each test."""
+        WaitlistEntry.objects.all().delete()
+        RestaurantTable.objects.all().delete()
+
+        self.table = RestaurantTable.objects.create(
+            identifier='Standard Table',
+            capacity=4,
+            status=RestaurantTable.Status.FREE,
+            location=RestaurantTable.Location.ANY,
+            seating_type=RestaurantTable.SeatingType.STANDARD,
+            has_accessibility=False,
+            can_accommodate_high_chair=False,
+        )
+
+    def _make_entry(self, name, minutes_ago, status=WaitlistEntry.Status.WAITING,
+                     party_size=2, preference_notes=''):
+        checked_in_at = timezone.now() - timezone.timedelta(minutes=minutes_ago)
+        return WaitlistEntry.objects.create(
+            guest_name=name,
+            party_size=party_size,
+            status=status,
+            checked_in_at=checked_in_at,
+            preference_notes=preference_notes,
+        )
+
+    def test_type_checking_rejects_non_table_argument(self):
+        """Function should raise TypeError if table is not RestaurantTable."""
+        with self.assertRaises(TypeError):
+            match_table_automatically('not a table')
+
+    def test_successful_match_assigns_guest_and_reserves_table(self):
+        """A compatible waiting guest is assigned to the table, notified,
+        and the table becomes reserved."""
+        entry = self._make_entry('Alice', minutes_ago=10)
+
+        result = match_table_automatically(self.table)
+
+        self.assertEqual(result, entry)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+
+        self.assertEqual(entry.assigned_table, self.table)
+        self.assertEqual(entry.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertIsNotNone(entry.notified_at)
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+
+    def test_no_eligible_guest_leaves_table_free(self):
+        """When no compatible guest exists, the table remains free and
+        nothing is mutated."""
+        incompatible = self._make_entry('Huge Party', minutes_ago=5, party_size=10)
+
+        result = match_table_automatically(self.table)
+
+        self.assertIsNone(result)
+
+        incompatible.refresh_from_db()
+        self.table.refresh_from_db()
+
+        self.assertEqual(self.table.status, RestaurantTable.Status.FREE)
+        self.assertIsNone(incompatible.assigned_table)
+        self.assertEqual(incompatible.status, WaitlistEntry.Status.WAITING)
+        self.assertIsNone(incompatible.notified_at)
+
+    def test_table_not_free_is_not_matched(self):
+        """If the table's status is not free, no matching logic runs even
+        if a compatible guest is waiting."""
+        self.table.status = RestaurantTable.Status.OCCUPIED
+        self.table.save(update_fields=['status'])
+        entry = self._make_entry('Alice', minutes_ago=10)
+
+        result = match_table_automatically(self.table)
+
+        self.assertIsNone(result)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+
+        self.assertIsNone(entry.assigned_table)
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+        self.assertEqual(self.table.status, RestaurantTable.Status.OCCUPIED)
+
+    def test_correct_guest_selected_among_multiple_candidates(self):
+        """The highest-priority compatible guest (per
+        select_next_guest_for_table) is the one matched."""
+        newer = self._make_entry('Bob', minutes_ago=5)
+        older = self._make_entry('Alice', minutes_ago=20)
+        incompatible_but_older_still = self._make_entry(
+            'Huge Party', minutes_ago=100, party_size=10
+        )
+        late_demoted = self._make_entry(
+            'Dave', minutes_ago=200, status=WaitlistEntry.Status.LATE_DEMOTED
+        )
+
+        result = match_table_automatically(self.table)
+
+        self.assertEqual(result, older)
+
+        older.refresh_from_db()
+        self.table.refresh_from_db()
+        newer.refresh_from_db()
+        late_demoted.refresh_from_db()
+
+        self.assertEqual(older.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertEqual(older.assigned_table, self.table)
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+
+        # Others remain untouched.
+        self.assertEqual(newer.status, WaitlistEntry.Status.WAITING)
+        self.assertIsNone(newer.assigned_table)
+        self.assertEqual(late_demoted.status, WaitlistEntry.Status.LATE_DEMOTED)
+        self.assertIsNone(late_demoted.assigned_table)
