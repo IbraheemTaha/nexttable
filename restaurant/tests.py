@@ -4699,3 +4699,179 @@ class SeedDemoDataCommandTests(TestCase):
         self.assertIn('manager_demo', output)
         self.assertIn('LOCAL DEVELOPMENT ONLY', output)
 
+
+class EndToEndWaitlistWorkflowTests(TestCase):
+    """Full-system workflow test (Issue #31).
+
+    Walks the entire MVP guest journey through the real views and service
+    functions, using the realistic seed data from #29 (issue #31 acceptance
+    criteria: "uses the real seed-data command ... rather than ad hoc
+    minimal data"). Asserts real database state (statuses, timestamps,
+    table state) at every step, not just HTTP status codes.
+    """
+
+    def setUp(self):
+        call_command('seed_demo_data')
+
+        self.table = RestaurantTable.objects.get(identifier='T1')
+        self.assertEqual(self.table.capacity, 2)
+
+        # Simulate the table already being occupied by other diners when
+        # our guest checks in, so there is no free compatible table yet
+        # and automatic matching has nothing to do at check-in time.
+        self.table.status = RestaurantTable.Status.OCCUPIED
+        self.table.save(update_fields=['status', 'updated_at'])
+
+        user_model = get_user_model()
+        self.staff_user = user_model.objects.get(username='staff_demo')
+
+        self.token = get_current_check_in_token()
+
+    def test_full_guest_journey_from_check_in_to_table_turned_over(self):
+        # --- Step 1: guest checks in through the public form ---
+        submit_url = reverse(
+            'restaurant:guest_check_in_submit', args=[self.token]
+        )
+        response = self.client.post(
+            submit_url,
+            {
+                'guest_name': 'Alex Guest',
+                'party_size': 2,
+                'phone_number': '555-0100',
+                'location_preference': 'no_preference',
+                'seating_preference': 'no_preference',
+                'high_chair_needed': 'no',
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        entry = WaitlistEntry.objects.get(guest_name='Alex Guest')
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+        self.assertEqual(entry.party_size, 2)
+        self.assertIsNone(entry.assigned_table)
+        self.assertIsNotNone(entry.checked_in_at)
+
+        # --- Step 2: guest's own waiting/status page reflects the entry ---
+        status_url = reverse(
+            'restaurant:guest_check_in_status', args=[entry.public_identifier]
+        )
+        response = self.client.get(status_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Alex Guest')
+        self.assertEqual(
+            response.context['entry'].status, WaitlistEntry.Status.WAITING
+        )
+        self.assertFalse(response.context['show_table_ready_message'])
+
+        # --- Staff sees the guest on the waitlist while it's still occupied ---
+        self.client.force_login(self.staff_user)
+        waitlist_url = reverse('restaurant:waitlist')
+        response = self.client.get(waitlist_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(entry, list(response.context['entries']))
+
+        # --- Step 3a: staff clears the table to cleaning (no auto-match: ---
+        # --- target status is not "free") ---
+        cleaning_url = reverse(
+            'restaurant:table_status_action',
+            args=[self.table.id, 'cleaning'],
+        )
+        response = self.client.post(cleaning_url)
+        self.assertEqual(response.status_code, 302)
+
+        self.table.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertEqual(self.table.status, RestaurantTable.Status.CLEANING)
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+        self.assertIsNone(entry.assigned_table)
+
+        # --- Step 3b: staff marks the table free -> automatic matching ---
+        # --- assigns our compatible waiting guest and notifies them ---
+        free_url = reverse(
+            'restaurant:table_status_action',
+            args=[self.table.id, 'free'],
+        )
+        response = self.client.post(free_url)
+        self.assertEqual(response.status_code, 302)
+
+        self.table.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+        self.assertEqual(entry.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertEqual(entry.assigned_table_id, self.table.id)
+        self.assertIsNotNone(entry.notified_at)
+
+        # Guest-facing status page now shows the "table ready" notification.
+        response = self.client.get(status_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['show_table_ready_message'])
+        self.assertEqual(
+            response.context['entry'].status, WaitlistEntry.Status.NOTIFIED
+        )
+
+        # --- Step 4: guest marked arrived ---
+        arrived_url = reverse(
+            'restaurant:waitlist_entry_action', args=[entry.id, 'arrived']
+        )
+        response = self.client.post(arrived_url)
+        self.assertEqual(response.status_code, 302)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.ARRIVED)
+        self.assertIsNotNone(entry.arrived_at)
+        # Table is still reserved, not yet occupied.
+        self.table.refresh_from_db()
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+
+        # --- Step 5: guest marked seated -> table becomes occupied ---
+        seated_url = reverse(
+            'restaurant:waitlist_entry_action', args=[entry.id, 'seated']
+        )
+        response = self.client.post(seated_url)
+        self.assertEqual(response.status_code, 302)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.SEATED)
+        self.assertIsNotNone(entry.seated_at)
+        self.assertEqual(self.table.status, RestaurantTable.Status.OCCUPIED)
+
+        # Table status board reflects the seated guest at their table.
+        table_status_url = reverse('restaurant:table_status')
+        response = self.client.get(table_status_url)
+        self.assertEqual(response.status_code, 200)
+        occupied_group = next(
+            group
+            for group in response.context['status_groups']
+            if group['status'] == RestaurantTable.Status.OCCUPIED
+        )
+        self.assertIn(self.table, occupied_group['tables'])
+
+        # --- Step 6: guest marked left -> table goes to cleaning ---
+        left_url = reverse(
+            'restaurant:waitlist_entry_action', args=[entry.id, 'left']
+        )
+        response = self.client.post(left_url)
+        self.assertEqual(response.status_code, 302)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.LEFT)
+        self.assertIsNotNone(entry.left_at)
+        self.assertEqual(self.table.status, RestaurantTable.Status.CLEANING)
+        # The entry keeps its assigned_table on record for history even
+        # though it no longer occupies it.
+        self.assertEqual(entry.assigned_table_id, self.table.id)
+
+        # --- Step 7: staff manually returns the table to free ---
+        response = self.client.post(free_url)
+        self.assertEqual(response.status_code, 302)
+
+        self.table.refresh_from_db()
+        self.assertEqual(self.table.status, RestaurantTable.Status.FREE)
+
+        # No other guest was waiting for this table, so it stays free
+        # rather than being immediately re-matched.
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.LEFT)
+
