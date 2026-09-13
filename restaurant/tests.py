@@ -133,6 +133,16 @@ class RestaurantTableModelTests(TestCase):
 
 
 class WaitlistEntryModelTests(TestCase):
+    def test_valid_entry_with_default_status_passes_validation(self):
+        entry = WaitlistEntry(
+            guest_name='Ada Lovelace',
+            party_size=3,
+        )
+
+        entry.full_clean()
+
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+
     def test_can_create_with_required_fields_and_defaults(self):
         entry = WaitlistEntry.objects.create(
             guest_name='Ada Lovelace',
@@ -155,6 +165,32 @@ class WaitlistEntryModelTests(TestCase):
         self.assertIsNone(entry.left_at)
         self.assertIsNotNone(entry.created_at)
         self.assertIsNotNone(entry.updated_at)
+
+    def test_rejects_missing_guest_name(self):
+        entry = WaitlistEntry(party_size=2)
+
+        with self.assertRaises(ValidationError) as context:
+            entry.full_clean()
+
+        self.assertIn('guest_name', context.exception.message_dict)
+
+    def test_rejects_blank_guest_name(self):
+        for guest_name in ['', '   ']:
+            with self.subTest(guest_name=repr(guest_name)):
+                entry = WaitlistEntry(guest_name=guest_name, party_size=2)
+
+                with self.assertRaises(ValidationError) as context:
+                    entry.full_clean()
+
+                self.assertIn('guest_name', context.exception.message_dict)
+
+    def test_rejects_missing_party_size(self):
+        entry = WaitlistEntry(guest_name='Missing Party Size')
+
+        with self.assertRaises(ValidationError) as context:
+            entry.full_clean()
+
+        self.assertIn('party_size', context.exception.message_dict)
 
     def test_checked_in_at_is_automatic_but_can_be_explicitly_set(self):
         explicit_check_in = timezone.now() - timezone.timedelta(days=1)
@@ -200,6 +236,51 @@ class WaitlistEntryModelTests(TestCase):
                     entry.full_clean()
 
                 self.assertIn('party_size', context.exception.message_dict)
+
+    def test_rejects_invalid_status(self):
+        entry = WaitlistEntry(
+            guest_name='Invalid Status',
+            party_size=2,
+            status='paused',
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            entry.full_clean()
+
+        self.assertIn('status', context.exception.message_dict)
+
+    def test_optional_text_fields_may_be_blank(self):
+        entry = WaitlistEntry(
+            guest_name='Optional Fields',
+            party_size=2,
+            contact_text='',
+            preference_notes='',
+        )
+
+        entry.full_clean()
+
+    def test_priority_metadata_defaults_are_independent_dicts(self):
+        first = WaitlistEntry(guest_name='First Guest', party_size=2)
+        second = WaitlistEntry(guest_name='Second Guest', party_size=4)
+
+        self.assertEqual(first.priority_metadata, {})
+        self.assertEqual(second.priority_metadata, {})
+        self.assertIsNot(first.priority_metadata, second.priority_metadata)
+
+        first.priority_metadata['score'] = 10
+
+        self.assertEqual(second.priority_metadata, {})
+
+    def test_all_status_choices_validate(self):
+        for status in WaitlistEntry.Status.values:
+            with self.subTest(status=status):
+                entry = WaitlistEntry(
+                    guest_name='Valid Status',
+                    party_size=2,
+                    status=status,
+                )
+
+                entry.full_clean()
 
     def test_assigned_table_links_to_restaurant_table(self):
         table = RestaurantTable.objects.create(

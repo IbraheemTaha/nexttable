@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.utils import timezone
 
@@ -176,6 +177,11 @@ class WaitlistEntry(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        super().clean()
+        if self.guest_name is not None and not self.guest_name.strip():
+            raise ValidationError({'guest_name': 'Guest name cannot be blank.'})
 
     def __str__(self):
         return f'{self.guest_name} ({self.party_size})'
