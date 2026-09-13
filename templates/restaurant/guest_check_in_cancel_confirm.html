@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - Confirm Cancellation{% endblock %}
+
+{% block content %}
+<h1 id="guest-cancel-confirm-marker" class="text-2xl font-bold">Cancel your waitlist spot?</h1>
+
+<p class="mt-2">
+    This will remove {{ entry.guest_name }}'s party of {{ entry.party_size }} from the active waitlist.
+</p>
+
+{% if cancellation_blocked %}
+    <p id="guest-cancel-blocked-marker" class="mt-4">
+        This waitlist spot can no longer be cancelled because its current status is {{ entry.get_status_display }}.
+    </p>
+    <p class="mt-4">
+        <a href="{% url 'restaurant:guest_check_in_status' entry.public_identifier %}">Return to waiting page</a>
+    </p>
+{% elif can_cancel %}
+    <form method="post" action="{{ cancel_url }}" class="mt-4">
+        {% csrf_token %}
+        <button type="submit">Confirm cancellation</button>
+        <a href="{% url 'restaurant:guest_check_in_status' entry.public_identifier %}">Keep my spot</a>
+    </form>
+{% else %}
+    <p id="guest-cancel-unavailable-marker" class="mt-4">
+        This waitlist spot can no longer be cancelled because its current status is {{ entry.get_status_display }}.
+    </p>
+    <p class="mt-4">
+        <a href="{% url 'restaurant:guest_check_in_status' entry.public_identifier %}">Return to waiting page</a>
+    </p>
+{% endif %}
+{% endblock %}

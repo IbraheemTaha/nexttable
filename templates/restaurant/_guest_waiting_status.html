@@ -1,0 +1,25 @@
+<div id="guest-waiting-status-content">
+    <dl>
+        <dt>Status</dt>
+        <dd id="guest-facing-status">{{ entry.get_status_display }}</dd>
+
+        <dt>Estimated wait</dt>
+        <dd>{{ entry.estimated_wait_minutes }} minutes</dd>
+    </dl>
+
+    {% if show_table_ready_message %}
+        <p id="table-ready-message" class="mt-3">
+            Your table is ready. Please check in with staff or approach the host stand.
+        </p>
+    {% endif %}
+
+    {% if can_cancel %}
+        <p class="mt-3">
+            <a href="{{ cancel_url }}" id="guest-cancel-link">Cancel waitlist spot</a>
+        </p>
+    {% else %}
+        <p id="guest-cancellation-unavailable" class="mt-3">
+            Cancellation is not available for this status.
+        </p>
+    {% endif %}
+</div>

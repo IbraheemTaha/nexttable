@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from .auth import manager_required, staff_or_manager_required
@@ -80,8 +81,78 @@ def guest_check_in_status(request, public_identifier):
     return render(
         request,
         'restaurant/guest_check_in_status.html',
-        {'entry': entry},
+        _guest_status_context(entry),
     )
+
+
+def guest_check_in_status_partial(request, public_identifier):
+    entry = get_object_or_404(
+        WaitlistEntry,
+        public_identifier=public_identifier,
+    )
+    return render(
+        request,
+        'restaurant/_guest_waiting_status.html',
+        _guest_status_context(entry),
+    )
+
+
+def guest_check_in_cancel(request, public_identifier):
+    entry = get_object_or_404(
+        WaitlistEntry,
+        public_identifier=public_identifier,
+    )
+    if request.method == 'POST':
+        if _entry_can_be_cancelled(entry):
+            entry.status = WaitlistEntry.Status.CANCELLED
+            entry.cancelled_at = timezone.now()
+            entry.save(update_fields=['status', 'cancelled_at', 'updated_at'])
+            return redirect(
+                'restaurant:guest_check_in_status',
+                public_identifier=entry.public_identifier,
+            )
+
+        return render(
+            request,
+            'restaurant/guest_check_in_cancel_confirm.html',
+            _guest_status_context(
+                entry,
+                cancellation_blocked=True,
+            ),
+        )
+
+    return render(
+        request,
+        'restaurant/guest_check_in_cancel_confirm.html',
+        _guest_status_context(entry),
+    )
+
+
+def _entry_can_be_cancelled(entry):
+    return entry.status in {
+        WaitlistEntry.Status.WAITING,
+        WaitlistEntry.Status.ARRIVED,
+        WaitlistEntry.Status.LATE_DEMOTED,
+    }
+
+
+def _guest_status_context(entry, cancellation_blocked=False):
+    return {
+        'entry': entry,
+        'can_cancel': _entry_can_be_cancelled(entry),
+        'show_table_ready_message': (
+            entry.status == WaitlistEntry.Status.NOTIFIED
+        ),
+        'status_partial_url': reverse(
+            'restaurant:guest_check_in_status_partial',
+            args=[entry.public_identifier],
+        ),
+        'cancel_url': reverse(
+            'restaurant:guest_check_in_cancel',
+            args=[entry.public_identifier],
+        ),
+        'cancellation_blocked': cancellation_blocked,
+    }
 
 
 def _check_in_token_state(token):

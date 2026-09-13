@@ -20,6 +20,16 @@ urlpatterns = [
         views.guest_check_in_status,
         name='guest_check_in_status',
     ),
+    path(
+        'check-in/status/<uuid:public_identifier>/partial/',
+        views.guest_check_in_status_partial,
+        name='guest_check_in_status_partial',
+    ),
+    path(
+        'check-in/status/<uuid:public_identifier>/cancel/',
+        views.guest_check_in_cancel,
+        name='guest_check_in_cancel',
+    ),
     path('staff/', views.staff_landing, name='staff_landing'),
     path('manager/', views.manager_landing, name='manager_landing'),
     path(

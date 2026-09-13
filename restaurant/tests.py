@@ -335,6 +335,255 @@ class GuestCheckInPageTests(TestCase):
         self.assertIsNone(entry.notified_at)
 
 
+class GuestWaitingPageTests(TestCase):
+    def create_entry(self, **overrides):
+        defaults = {
+            'guest_name': 'Grace Hopper',
+            'party_size': 4,
+            'estimated_wait_minutes': 22,
+        }
+        defaults.update(overrides)
+        return WaitlistEntry.objects.create(**defaults)
+
+    def test_full_waiting_page_is_public_and_shows_guest_facing_information(self):
+        entry = self.create_entry()
+
+        response = self.client.get(
+            reverse(
+                'restaurant:guest_check_in_status',
+                args=[entry.public_identifier],
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="guest-check-in-status-marker"')
+        self.assertContains(response, 'Grace Hopper')
+        self.assertContains(response, '4')
+        self.assertContains(response, 'Waiting')
+        self.assertContains(response, '22 minutes')
+        self.assertContains(response, 'hx-get=')
+        self.assertContains(response, 'hx-trigger="load, every 15s"')
+        self.assertContains(response, 'hx-swap="innerHTML"')
+        self.assertNotContains(response, 'Queue position')
+        self.assertNotContains(response, 'priority_metadata')
+        self.assertNotContains(response, 'admin/')
+        self.assertNotContains(response, reverse('login'))
+
+    def test_partial_refresh_renders_current_status_eta_and_actions(self):
+        entry = self.create_entry(status=WaitlistEntry.Status.ARRIVED)
+
+        response = self.client.get(
+            reverse(
+                'restaurant:guest_check_in_status_partial',
+                args=[entry.public_identifier],
+            ),
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="guest-waiting-status-content"')
+        self.assertContains(response, 'Arrived')
+        self.assertContains(response, '22 minutes')
+        self.assertContains(response, 'Cancel waitlist spot')
+        self.assertNotContains(response, 'Guest name')
+
+    def test_partial_refresh_returns_not_found_for_unknown_identifier(self):
+        unknown_identifier = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+
+        response = self.client.get(
+            reverse(
+                'restaurant:guest_check_in_status_partial',
+                args=[unknown_identifier],
+            )
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_malformed_status_identifier_returns_not_found(self):
+        response = self.client.get('/check-in/status/not-a-uuid/')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_cancellation_action_is_visible_only_for_cancellable_statuses(self):
+        cancellable_statuses = [
+            WaitlistEntry.Status.WAITING,
+            WaitlistEntry.Status.ARRIVED,
+            WaitlistEntry.Status.LATE_DEMOTED,
+        ]
+        blocked_statuses = [
+            WaitlistEntry.Status.NOTIFIED,
+            WaitlistEntry.Status.SEATED,
+            WaitlistEntry.Status.CANCELLED,
+            WaitlistEntry.Status.NO_SHOW,
+            WaitlistEntry.Status.LEFT,
+        ]
+
+        for status in cancellable_statuses:
+            with self.subTest(status=status):
+                entry = self.create_entry(status=status)
+                response = self.client.get(
+                    reverse(
+                        'restaurant:guest_check_in_status',
+                        args=[entry.public_identifier],
+                    )
+                )
+
+                self.assertContains(response, 'Cancel waitlist spot')
+
+        for status in blocked_statuses:
+            with self.subTest(status=status):
+                entry = self.create_entry(
+                    guest_name=f'Blocked {status}',
+                    status=status,
+                )
+                response = self.client.get(
+                    reverse(
+                        'restaurant:guest_check_in_status',
+                        args=[entry.public_identifier],
+                    )
+                )
+
+                self.assertNotContains(response, 'Cancel waitlist spot')
+                self.assertContains(response, 'Cancellation is not available')
+
+    def test_cancel_get_shows_confirmation_without_changing_entry(self):
+        entry = self.create_entry()
+
+        response = self.client.get(
+            reverse(
+                'restaurant:guest_check_in_cancel',
+                args=[entry.public_identifier],
+            )
+        )
+
+        entry.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="guest-cancel-confirm-marker"')
+        self.assertContains(response, 'Confirm cancellation')
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+        self.assertIsNone(entry.cancelled_at)
+
+    def test_confirming_cancellation_updates_allowed_statuses(self):
+        allowed_statuses = [
+            WaitlistEntry.Status.WAITING,
+            WaitlistEntry.Status.ARRIVED,
+            WaitlistEntry.Status.LATE_DEMOTED,
+        ]
+
+        for status in allowed_statuses:
+            with self.subTest(status=status):
+                entry = self.create_entry(
+                    guest_name=f'Cancellable {status}',
+                    status=status,
+                )
+
+                response = self.client.post(
+                    reverse(
+                        'restaurant:guest_check_in_cancel',
+                        args=[entry.public_identifier],
+                    )
+                )
+
+                entry.refresh_from_db()
+                self.assertRedirects(
+                    response,
+                    reverse(
+                        'restaurant:guest_check_in_status',
+                        args=[entry.public_identifier],
+                    ),
+                )
+                self.assertEqual(entry.status, WaitlistEntry.Status.CANCELLED)
+                self.assertIsNotNone(entry.cancelled_at)
+                self.assertEqual(entry.guest_name, f'Cancellable {status}')
+                self.assertEqual(entry.party_size, 4)
+
+    def test_successful_cancellation_page_shows_cancelled_without_action(self):
+        entry = self.create_entry()
+
+        self.client.post(
+            reverse(
+                'restaurant:guest_check_in_cancel',
+                args=[entry.public_identifier],
+            )
+        )
+        response = self.client.get(
+            reverse(
+                'restaurant:guest_check_in_status',
+                args=[entry.public_identifier],
+            )
+        )
+
+        self.assertContains(response, 'Cancelled')
+        self.assertContains(response, 'Cancellation is not available')
+        self.assertNotContains(response, 'Cancel waitlist spot')
+
+    def test_confirming_cancellation_is_blocked_for_disallowed_statuses(self):
+        blocked_statuses = [
+            WaitlistEntry.Status.NOTIFIED,
+            WaitlistEntry.Status.SEATED,
+            WaitlistEntry.Status.CANCELLED,
+            WaitlistEntry.Status.NO_SHOW,
+            WaitlistEntry.Status.LEFT,
+        ]
+
+        for status in blocked_statuses:
+            with self.subTest(status=status):
+                entry = self.create_entry(
+                    guest_name=f'Blocked {status}',
+                    status=status,
+                )
+
+                response = self.client.post(
+                    reverse(
+                        'restaurant:guest_check_in_cancel',
+                        args=[entry.public_identifier],
+                    )
+                )
+
+                entry.refresh_from_db()
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'can no longer be cancelled')
+                self.assertEqual(entry.status, status)
+                self.assertIsNone(entry.cancelled_at)
+
+    def test_table_ready_message_only_shows_for_notified_status(self):
+        notified_entry = self.create_entry(status=WaitlistEntry.Status.NOTIFIED)
+        waiting_entry = self.create_entry(
+            guest_name='Waiting Guest',
+            status=WaitlistEntry.Status.WAITING,
+        )
+
+        notified_response = self.client.get(
+            reverse(
+                'restaurant:guest_check_in_status',
+                args=[notified_entry.public_identifier],
+            )
+        )
+        waiting_response = self.client.get(
+            reverse(
+                'restaurant:guest_check_in_status',
+                args=[waiting_entry.public_identifier],
+            )
+        )
+
+        self.assertContains(notified_response, 'id="table-ready-message"')
+        self.assertContains(notified_response, 'approach the host stand')
+        self.assertNotContains(waiting_response, 'id="table-ready-message"')
+        self.assertNotContains(waiting_response, 'approach the host stand')
+
+    def test_unknown_status_identifier_returns_not_found(self):
+        unknown_identifier = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+
+        response = self.client.get(
+            reverse(
+                'restaurant:guest_check_in_status',
+                args=[unknown_identifier],
+            )
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+
 class RestaurantSettingsGetActiveTests(TestCase):
     def test_lazily_creates_row_with_defaults_on_empty_database(self):
         self.assertEqual(RestaurantSettings.objects.count(), 0)
