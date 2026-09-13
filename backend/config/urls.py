@@ -33,5 +33,6 @@ urlpatterns = [
         name='logout',
     ),
     path('', include('restaurant.urls')),
+    path('api/', include('restaurant.api.urls')),
     path('admin/', admin.site.urls),
 ]

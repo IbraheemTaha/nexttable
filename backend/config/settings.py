@@ -60,6 +60,19 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+# Origins allowed to make cross-origin requests to the API (the standalone
+# frontend app's dev server / deployed origin). Comma-separated, e.g.
+# "http://localhost:5173,https://app.example.com". Both CORS and CSRF need
+# the exact scheme+host+port of the frontend so session-cookie auth works
+# across origins.
+FRONTEND_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        'FRONTEND_ORIGINS', 'http://localhost:5173'
+    ).split(',')
+    if origin.strip()
+]
+
 
 # Application definition
 
@@ -70,11 +83,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'corsheaders',
     'restaurant',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -82,6 +98,26 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# CORS: only the frontend app's own origin(s) may make cross-origin
+# requests, and only with credentials (session cookie) attached - never a
+# wildcard, since ALLOW_CREDENTIALS with "*" is both invalid and unsafe.
+CORS_ALLOWED_ORIGINS = FRONTEND_ORIGINS
+CORS_ALLOW_CREDENTIALS = True
+
+# CSRF: Django validates the Origin/Referer of unsafe requests against this
+# list, so the frontend origin(s) must be trusted here too even though
+# they're a different origin from the API itself.
+CSRF_TRUSTED_ORIGINS = FRONTEND_ORIGINS
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+}
 
 ROOT_URLCONF = 'config.urls'
 
@@ -168,3 +204,15 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'restaurant:staff_landing'
 LOGOUT_REDIRECT_URL = 'placeholder'
+
+# The frontend is a separate origin, so the session/CSRF cookies must be
+# sent as SameSite=None to survive a cross-site fetch(credentials:
+# "include"). Browsers only honor SameSite=None on cookies marked Secure,
+# which requires HTTPS - fine in production, but local dev talks over plain
+# http://localhost, so cookies there fall back to Lax (which still works
+# because the Vite dev server proxies /api same-origin - see frontend
+# README).
+SESSION_COOKIE_SAMESITE = 'None' if not DEBUG else 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = 'None' if not DEBUG else 'Lax'
+CSRF_COOKIE_SECURE = not DEBUG
