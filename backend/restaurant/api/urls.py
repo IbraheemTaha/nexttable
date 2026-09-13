@@ -10,6 +10,7 @@ urlpatterns = [
     path('auth/logout/', views.logout_view, name='logout'),
     path('auth/me/', views.current_user_view, name='me'),
 
+    path('check-in/current-token/', views.current_check_in_token_view, name='current_check_in_token'),
     path('check-in/<str:token>/', views.guest_check_in_view, name='check_in'),
     path(
         'check-in/status/<uuid:public_identifier>/',

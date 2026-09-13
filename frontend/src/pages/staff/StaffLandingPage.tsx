@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { CheckInLinkCard } from '../../components/CheckInLinkCard'
 
 export function StaffLandingPage() {
   return (
@@ -20,6 +21,8 @@ export function StaffLandingPage() {
           </p>
         </Link>
       </nav>
+
+      <CheckInLinkCard />
     </div>
   )
 }

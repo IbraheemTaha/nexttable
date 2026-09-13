@@ -123,6 +123,7 @@ Do not use these credentials in production.
 Useful React app routes:
 
 ```text
+/                (public home page: guest check-in link + staff/manager login)
 /login
 /staff
 /staff/waitlist
@@ -135,15 +136,26 @@ Useful React app routes:
 
 ## Guest Check-In URL
 
-Guest check-in uses a daily token derived from Django's `SECRET_KEY`.
+Guest check-in uses a daily token derived from Django's `SECRET_KEY`. The
+frontend's home page (`http://localhost:5173/`) displays today's full
+check-in link as a clickable, copyable URL — no login required, since this
+is exactly the link a restaurant would print as a QR code. The same page
+also has a "Log in" button for staff/manager access.
 
-Generate today's local token:
+The token itself is served publicly by the backend:
+
+```text
+GET /api/check-in/current-token/
+```
+
+To generate today's token from the command line instead (e.g. for scripting
+a QR code image):
 
 ```sh
 uv run backend/manage.py shell -c "from restaurant.check_in_tokens import get_current_check_in_token; print(get_current_check_in_token())"
 ```
 
-Open the React route:
+The resulting guest-facing URL is:
 
 ```text
 http://localhost:5173/check-in/<token>
@@ -196,6 +208,7 @@ GET  /api/auth/me/
 Guest:
 
 ```text
+GET      /api/check-in/current-token/
 GET|POST /api/check-in/<token>/
 GET      /api/check-in/status/<public_identifier>/
 POST     /api/check-in/status/<public_identifier>/cancel/

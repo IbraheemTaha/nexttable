@@ -56,6 +56,7 @@ The backend must also allow the deployed frontend origin through `FRONTEND_ORIGI
 Public:
 
 ```text
+/                (home page: guest check-in link + staff/manager login)
 /login
 /check-in/:token
 /check-in/status/:publicIdentifier

@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..auth import user_is_manager, user_is_staff_or_manager
-from ..check_in_tokens import is_valid_check_in_token
+from ..check_in_tokens import get_current_check_in_token, is_valid_check_in_token
 from ..forms import (
     EtaRuleForm,
     GracePeriodForm,
@@ -162,6 +162,16 @@ def guest_check_in_cancel_view(request, public_identifier):
     entry.cancelled_at = timezone.now()
     entry.save(update_fields=['status', 'cancelled_at', 'updated_at'])
     return Response(_serialize_guest_status(entry))
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def current_check_in_token_view(request):
+    # Deliberately public: this token is exactly what a printed QR code at
+    # the restaurant would encode, so it isn't a secret that needs staff
+    # auth - the app's own landing page displays it the same way a QR code
+    # would.
+    return Response({'token': get_current_check_in_token()})
 
 
 # --- Staff: waitlist ----------------------------------------------------

@@ -5,6 +5,7 @@ import { AuthProvider } from './lib/AuthContext'
 import { GuestCancelPage } from './pages/guest/GuestCancelPage'
 import { GuestCheckInPage } from './pages/guest/GuestCheckInPage'
 import { GuestStatusPage } from './pages/guest/GuestStatusPage'
+import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
 import { EtaConfigPage } from './pages/manager/EtaConfigPage'
 import { EtaRuleFormPage } from './pages/manager/EtaRuleFormPage'
@@ -23,7 +24,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
 
           <Route path="/check-in/:token" element={<GuestCheckInPage />} />
@@ -64,7 +65,7 @@ export default function App() {
             <Route path="eta/grace-period" element={<GracePeriodFormPage />} />
           </Route>
 
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>

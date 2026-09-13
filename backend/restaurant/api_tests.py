@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from .check_in_tokens import get_current_check_in_token
+from .check_in_tokens import get_current_check_in_token, is_valid_check_in_token
 from .models import EtaRule, RestaurantTable, WaitlistEntry, WorkerProfile
 
 
@@ -45,6 +45,12 @@ class WaitlistApiTests(TestCase):
         anon_client = self.client_class()
         response = anon_client.get(reverse('restaurant_api:waitlist'))
         self.assertEqual(response.status_code, 403)
+
+    def test_current_check_in_token_is_public(self):
+        anon_client = self.client_class()
+        response = anon_client.get(reverse('restaurant_api:current_check_in_token'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(is_valid_check_in_token(response.json()['token']))
 
     def test_waitlist_lists_active_entries(self):
         WaitlistEntry.objects.create(guest_name='Ada', party_size=2)

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { CheckInLinkCard } from '../../components/CheckInLinkCard'
 
 export function ManagerLandingPage() {
   return (
@@ -20,6 +21,8 @@ export function ManagerLandingPage() {
           <p className="mt-1 text-sm text-stone-500">Tune wait-time estimates by party size.</p>
         </Link>
       </div>
+
+      <CheckInLinkCard />
     </div>
   )
 }
