@@ -38,6 +38,11 @@ urlpatterns = [
         name='waitlist_entry_action',
     ),
     path('staff/tables/', views.table_status, name='table_status'),
+    path(
+        'staff/tables/<int:table_id>/<str:target_status>/',
+        views.table_status_action,
+        name='table_status_action',
+    ),
     path('manager/', views.manager_landing, name='manager_landing'),
     path(
         'manager/workers/',

@@ -34,6 +34,7 @@ from .services import (
     mark_guest_seated,
     match_table_automatically,
     select_next_guest_for_table,
+    set_table_status,
 )
 
 
@@ -3657,3 +3658,268 @@ class WaitlistEntryActionViewTests(TestCase):
 
         entry.refresh_from_db()
         self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+
+
+class SetTableStatusServiceTests(TestCase):
+    """Tests for the set_table_status service function (#23)."""
+
+    def setUp(self):
+        WaitlistEntry.objects.all().delete()
+        RestaurantTable.objects.all().delete()
+
+    def _make_table(self, status, **kwargs):
+        defaults = dict(
+            identifier='Set-Status-Table',
+            capacity=4,
+            status=status,
+            location=RestaurantTable.Location.ANY,
+            seating_type=RestaurantTable.SeatingType.STANDARD,
+            has_accessibility=False,
+            can_accommodate_high_chair=False,
+        )
+        defaults.update(kwargs)
+        return RestaurantTable.objects.create(**defaults)
+
+    def test_type_checking_rejects_non_table_argument(self):
+        with self.assertRaises(TypeError):
+            set_table_status('not a table', RestaurantTable.Status.FREE)
+
+    def test_cleaning_to_free_is_valid(self):
+        table = self._make_table(RestaurantTable.Status.CLEANING)
+
+        result = set_table_status(table, RestaurantTable.Status.FREE)
+
+        table.refresh_from_db()
+        self.assertEqual(result, table)
+        self.assertEqual(table.status, RestaurantTable.Status.FREE)
+
+    def test_occupied_to_cleaning_is_valid(self):
+        table = self._make_table(RestaurantTable.Status.OCCUPIED)
+
+        set_table_status(table, RestaurantTable.Status.CLEANING)
+
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.CLEANING)
+
+    def test_reserved_to_free_is_valid(self):
+        table = self._make_table(RestaurantTable.Status.RESERVED)
+
+        set_table_status(table, RestaurantTable.Status.FREE)
+
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.FREE)
+
+    def test_free_to_occupied_is_valid(self):
+        table = self._make_table(RestaurantTable.Status.FREE)
+
+        set_table_status(table, RestaurantTable.Status.OCCUPIED)
+
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.OCCUPIED)
+
+    def test_invalid_transition_is_rejected_and_does_not_change_state(self):
+        table = self._make_table(RestaurantTable.Status.FREE)
+
+        with self.assertRaises(InvalidStatusTransitionError):
+            set_table_status(table, RestaurantTable.Status.CLEANING)
+
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.FREE)
+
+    def test_reserved_to_occupied_is_invalid(self):
+        table = self._make_table(RestaurantTable.Status.RESERVED)
+
+        with self.assertRaises(InvalidStatusTransitionError):
+            set_table_status(table, RestaurantTable.Status.OCCUPIED)
+
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.RESERVED)
+
+    def test_marking_free_triggers_automatic_matching_with_compatible_guest(self):
+        table = self._make_table(RestaurantTable.Status.CLEANING)
+        entry = WaitlistEntry.objects.create(
+            guest_name='Alice',
+            party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=timezone.now() - timezone.timedelta(minutes=10),
+        )
+
+        set_table_status(table, RestaurantTable.Status.FREE)
+
+        table.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.RESERVED)
+        self.assertEqual(entry.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertEqual(entry.assigned_table, table)
+        self.assertIsNotNone(entry.notified_at)
+
+    def test_marking_free_with_no_compatible_guest_leaves_table_free(self):
+        table = self._make_table(RestaurantTable.Status.RESERVED)
+        incompatible = WaitlistEntry.objects.create(
+            guest_name='Huge Party',
+            party_size=10,
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=timezone.now() - timezone.timedelta(minutes=5),
+        )
+
+        set_table_status(table, RestaurantTable.Status.FREE)
+
+        table.refresh_from_db()
+        incompatible.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.FREE)
+        self.assertIsNone(incompatible.assigned_table)
+        self.assertEqual(incompatible.status, WaitlistEntry.Status.WAITING)
+
+
+class TableStatusActionViewTests(TestCase):
+    """Tests for the staff table status action view (#23)."""
+
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.staff_user = user_model.objects.create_user(
+            username='table-action-staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+        cls.manager_user = user_model.objects.create_user(
+            username='table-action-manager',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.manager_user,
+            role=WorkerProfile.Role.MANAGER,
+        )
+        cls.no_role_user = user_model.objects.create_user(
+            username='table-action-plain',
+            password=cls.password,
+        )
+
+    def setUp(self):
+        WaitlistEntry.objects.all().delete()
+        RestaurantTable.objects.all().delete()
+
+    def _action_url(self, table, target_status):
+        return reverse(
+            'restaurant:table_status_action', args=[table.pk, target_status]
+        )
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        table = RestaurantTable.objects.create(
+            identifier='ANON', capacity=2,
+            status=RestaurantTable.Status.CLEANING,
+        )
+
+        response = self.client.post(self._action_url(table, 'free'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.CLEANING)
+
+    def test_no_role_user_is_denied(self):
+        self.client.force_login(self.no_role_user)
+        table = RestaurantTable.objects.create(
+            identifier='NOROLE', capacity=2,
+            status=RestaurantTable.Status.CLEANING,
+        )
+
+        response = self.client.post(self._action_url(table, 'free'))
+
+        self.assertEqual(response.status_code, 403)
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.CLEANING)
+
+    def test_staff_user_can_mark_table_free(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='STAFF-FREE', capacity=2,
+            status=RestaurantTable.Status.CLEANING,
+        )
+
+        response = self.client.post(self._action_url(table, 'free'))
+
+        self.assertRedirects(response, reverse('restaurant:table_status'))
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.FREE)
+
+    def test_manager_user_can_mark_table_status(self):
+        self.client.force_login(self.manager_user)
+        table = RestaurantTable.objects.create(
+            identifier='MGR-CLEAN', capacity=2,
+            status=RestaurantTable.Status.OCCUPIED,
+        )
+
+        response = self.client.post(self._action_url(table, 'cleaning'))
+
+        self.assertRedirects(response, reverse('restaurant:table_status'))
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.CLEANING)
+
+    def test_invalid_transition_shows_error_and_does_not_change_state(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='INVALID', capacity=2,
+            status=RestaurantTable.Status.FREE,
+        )
+
+        response = self.client.post(
+            self._action_url(table, 'cleaning'), follow=True
+        )
+
+        self.assertEqual(response.status_code, 200)
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.FREE)
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any(
+            'Cannot transition' in str(message) for message in messages_list
+        ))
+
+    def test_unknown_target_status_returns_404(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='BOGUS', capacity=2,
+            status=RestaurantTable.Status.FREE,
+        )
+
+        response = self.client.post(self._action_url(table, 'bogus'))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_request_does_not_mutate_state(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='GET-NOOP', capacity=2,
+            status=RestaurantTable.Status.CLEANING,
+        )
+
+        self.client.get(self._action_url(table, 'free'))
+
+        table.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.CLEANING)
+
+    def test_marking_table_free_triggers_matching_via_view(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='VIEW-MATCH', capacity=4,
+            status=RestaurantTable.Status.CLEANING,
+        )
+        entry = WaitlistEntry.objects.create(
+            guest_name='Bob',
+            party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=timezone.now() - timezone.timedelta(minutes=10),
+        )
+
+        self.client.post(self._action_url(table, 'free'))
+
+        table.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertEqual(table.status, RestaurantTable.Status.RESERVED)
+        self.assertEqual(entry.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertEqual(entry.assigned_table, table)

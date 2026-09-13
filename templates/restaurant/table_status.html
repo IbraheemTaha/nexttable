@@ -16,6 +16,7 @@
                 <th>Capacity</th>
                 <th>Guest</th>
                 <th>Party size</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -30,6 +31,29 @@
                 <td>&mdash;</td>
                 <td>&mdash;</td>
                 {% endif %}
+                <td>
+                    {% if table.status == 'free' %}
+                    <form method="post" action="{% url 'restaurant:table_status_action' table.pk 'occupied' %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" id="table-status-action-occupied-{{ table.pk }}">Seat walk-in (Occupied)</button>
+                    </form>
+                    {% elif table.status == 'occupied' %}
+                    <form method="post" action="{% url 'restaurant:table_status_action' table.pk 'cleaning' %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" id="table-status-action-cleaning-{{ table.pk }}">Mark Cleaning</button>
+                    </form>
+                    {% elif table.status == 'cleaning' %}
+                    <form method="post" action="{% url 'restaurant:table_status_action' table.pk 'free' %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" id="table-status-action-free-{{ table.pk }}">Mark Free</button>
+                    </form>
+                    {% elif table.status == 'reserved' %}
+                    <form method="post" action="{% url 'restaurant:table_status_action' table.pk 'free' %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" id="table-status-action-free-{{ table.pk }}">Mark Free</button>
+                    </form>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>

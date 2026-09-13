@@ -166,6 +166,68 @@ class InvalidStatusTransitionError(ValidationError):
     """Raised when a requested WaitlistEntry status transition is not allowed."""
 
 
+# Maps each manual table-status transition target to the set of statuses
+# it may be entered from via `set_table_status`.
+_ALLOWED_TABLE_TRANSITIONS = {
+    RestaurantTable.Status.FREE: {
+        RestaurantTable.Status.CLEANING,
+        RestaurantTable.Status.RESERVED,
+    },
+    RestaurantTable.Status.CLEANING: {
+        RestaurantTable.Status.OCCUPIED,
+    },
+    RestaurantTable.Status.OCCUPIED: {
+        RestaurantTable.Status.FREE,
+    },
+}
+
+
+def set_table_status(table, target_status):
+    """Manually transition a RestaurantTable to a new status.
+
+    Valid manual transitions are:
+    - cleaning -> free
+    - occupied -> cleaning
+    - reserved -> free
+    - free -> occupied (for walk-ins with no waitlist entry)
+
+    Whenever a table is manually set to free, `match_table_automatically`
+    is invoked immediately for that table. If a compatible waiting guest
+    is found, the table ends up reserved (not free) and the guest is
+    notified; otherwise the table remains free.
+
+    Args:
+        table: RestaurantTable instance to transition.
+        target_status: One of RestaurantTable.Status to transition to.
+
+    Returns:
+        The updated RestaurantTable instance.
+
+    Raises:
+        TypeError: If table is not a RestaurantTable instance.
+        InvalidStatusTransitionError: If the current status cannot
+            manually transition to target_status.
+    """
+    if not isinstance(table, RestaurantTable):
+        raise TypeError('table must be a RestaurantTable instance')
+
+    allowed_from = _ALLOWED_TABLE_TRANSITIONS.get(target_status, set())
+    if table.status not in allowed_from:
+        raise InvalidStatusTransitionError(
+            f'Cannot transition a table from "{table.status}" to '
+            f'"{target_status}".'
+        )
+
+    with transaction.atomic():
+        table.status = target_status
+        table.save(update_fields=['status', 'updated_at'])
+
+        if target_status == RestaurantTable.Status.FREE:
+            match_table_automatically(table)
+
+    return table
+
+
 # Maps each transition target status to the set of statuses it may be
 # entered from. Any status not listed as a key here has no valid inbound
 # transitions via the guest status action service functions.

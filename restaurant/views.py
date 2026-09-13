@@ -30,6 +30,7 @@ from .services import (
     mark_guest_left,
     mark_guest_no_show,
     mark_guest_seated,
+    set_table_status,
 )
 
 
@@ -147,6 +148,23 @@ def table_status(request):
         'restaurant/table_status.html',
         {'status_groups': status_groups},
     )
+
+
+@staff_or_manager_required
+def table_status_action(request, table_id, target_status):
+    table = get_object_or_404(RestaurantTable, pk=table_id)
+
+    valid_statuses = {status for status, _ in RestaurantTable.Status.choices}
+    if target_status not in valid_statuses:
+        raise Http404('Unknown table status.')
+
+    if request.method == 'POST':
+        try:
+            set_table_status(table, target_status)
+        except InvalidStatusTransitionError as exc:
+            messages.error(request, str(exc))
+
+    return redirect('restaurant:table_status')
 
 
 @manager_required
