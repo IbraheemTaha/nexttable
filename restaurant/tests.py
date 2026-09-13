@@ -1,7 +1,9 @@
 from datetime import datetime
+from io import StringIO
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.test import override_settings
 from django.contrib.auth import get_user_model
@@ -4485,4 +4487,90 @@ class DemoteLateGuestsServiceTests(TestCase):
         self.assertEqual(len(first_run), 1)
         self.assertEqual(second_run, [])
         self.assertEqual(entry.status, WaitlistEntry.Status.LATE_DEMOTED)
+
+
+class SeedDemoDataCommandTests(TestCase):
+    def test_creates_expected_records(self):
+        call_command('seed_demo_data')
+
+        self.assertEqual(RestaurantSettings.objects.count(), 1)
+        settings_row = RestaurantSettings.get_active()
+        self.assertTrue(settings_row.name)
+
+        User = get_user_model()
+        staff_user = User.objects.get(username='staff_demo')
+        manager_user = User.objects.get(username='manager_demo')
+        self.assertEqual(
+            staff_user.worker_profile.role, WorkerProfile.Role.STAFF
+        )
+        self.assertEqual(
+            manager_user.worker_profile.role, WorkerProfile.Role.MANAGER
+        )
+
+        self.assertGreaterEqual(EtaRule.objects.count(), 2)
+        self.assertTrue(
+            EtaRule.objects.filter(max_party_size__isnull=True).exists()
+        )
+        self.assertTrue(
+            EtaRule.objects.filter(max_party_size__isnull=False).exists()
+        )
+
+        self.assertGreaterEqual(RestaurantTable.objects.count(), 3)
+        capacities = set(
+            RestaurantTable.objects.values_list('capacity', flat=True)
+        )
+        self.assertGreater(len(capacities), 1)
+        locations = set(
+            RestaurantTable.objects.values_list('location', flat=True)
+        )
+        self.assertGreater(len(locations), 1)
+        self.assertTrue(
+            RestaurantTable.objects.filter(has_accessibility=True).exists()
+        )
+        self.assertTrue(
+            RestaurantTable.objects.filter(
+                can_accommodate_high_chair=True
+            ).exists()
+        )
+
+    def test_is_idempotent(self):
+        call_command('seed_demo_data')
+        call_command('seed_demo_data')
+
+        User = get_user_model()
+        self.assertEqual(
+            User.objects.filter(username='staff_demo').count(), 1
+        )
+        self.assertEqual(
+            User.objects.filter(username='manager_demo').count(), 1
+        )
+        self.assertEqual(RestaurantSettings.objects.count(), 1)
+        self.assertEqual(WorkerProfile.objects.count(), 2)
+
+        eta_rule_count = EtaRule.objects.count()
+        table_count = RestaurantTable.objects.count()
+
+        call_command('seed_demo_data')
+
+        self.assertEqual(EtaRule.objects.count(), eta_rule_count)
+        self.assertEqual(RestaurantTable.objects.count(), table_count)
+
+    def test_does_not_overwrite_existing_restaurant_name(self):
+        settings_row = RestaurantSettings.get_active()
+        settings_row.name = 'Custom Restaurant Name'
+        settings_row.save()
+
+        call_command('seed_demo_data')
+
+        settings_row.refresh_from_db()
+        self.assertEqual(settings_row.name, 'Custom Restaurant Name')
+
+    def test_prints_seeded_usernames_and_dev_only_note(self):
+        out = StringIO()
+        call_command('seed_demo_data', stdout=out)
+        output = out.getvalue()
+
+        self.assertIn('staff_demo', output)
+        self.assertIn('manager_demo', output)
+        self.assertIn('LOCAL DEVELOPMENT ONLY', output)
 
