@@ -1,6 +1,11 @@
 from django.contrib import admin
 
-from .models import RestaurantSettings, RestaurantTable, WorkerProfile
+from .models import (
+    RestaurantSettings,
+    RestaurantTable,
+    WaitlistEntry,
+    WorkerProfile,
+)
 
 
 @admin.register(RestaurantSettings)
@@ -43,3 +48,33 @@ class RestaurantTableAdmin(admin.ModelAdmin):
     list_filter = ('status', 'capacity')
     search_fields = ('identifier',)
     readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(WaitlistEntry)
+class WaitlistEntryAdmin(admin.ModelAdmin):
+    list_display = (
+        'guest_name',
+        'party_size',
+        'status',
+        'assigned_table',
+        'checked_in_at',
+        'updated_at',
+    )
+    list_filter = ('status', 'assigned_table', 'party_size')
+    search_fields = (
+        'guest_name',
+        'contact_text',
+        'preference_notes',
+        'assigned_table__identifier',
+    )
+    readonly_fields = (
+        'created_at',
+        'updated_at',
+        'checked_in_at',
+        'notified_at',
+        'arrived_at',
+        'seated_at',
+        'cancelled_at',
+        'no_show_at',
+        'left_at',
+    )

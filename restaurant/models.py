@@ -1,6 +1,7 @@
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator
+from django.utils import timezone
 
 # Fixed primary key used to enforce the RestaurantSettings singleton.
 #
@@ -132,3 +133,49 @@ class RestaurantTable(models.Model):
 
     def __str__(self):
         return f'{self.identifier} ({self.capacity})'
+
+
+class WaitlistEntry(models.Model):
+    """Guest waitlist record for the core check-in lifecycle."""
+
+    class Status(models.TextChoices):
+        WAITING = 'waiting', 'Waiting'
+        NOTIFIED = 'notified', 'Notified'
+        ARRIVED = 'arrived', 'Arrived'
+        SEATED = 'seated', 'Seated'
+        LATE_DEMOTED = 'late_demoted', 'Late/Demoted'
+        CANCELLED = 'cancelled', 'Cancelled'
+        NO_SHOW = 'no_show', 'No-show'
+        LEFT = 'left', 'Left'
+
+    guest_name = models.CharField(max_length=255)
+    party_size = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    contact_text = models.CharField(max_length=255, blank=True)
+    preference_notes = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.WAITING,
+    )
+    priority_metadata = models.JSONField(default=dict, blank=True)
+    assigned_table = models.ForeignKey(
+        RestaurantTable,
+        on_delete=models.SET_NULL,
+        related_name='waitlist_entries',
+        blank=True,
+        null=True,
+    )
+
+    checked_in_at = models.DateTimeField(default=timezone.now)
+    notified_at = models.DateTimeField(blank=True, null=True)
+    arrived_at = models.DateTimeField(blank=True, null=True)
+    seated_at = models.DateTimeField(blank=True, null=True)
+    cancelled_at = models.DateTimeField(blank=True, null=True)
+    no_show_at = models.DateTimeField(blank=True, null=True)
+    left_at = models.DateTimeField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.guest_name} ({self.party_size})'

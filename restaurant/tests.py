@@ -3,12 +3,14 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.urls import reverse
+from django.utils import timezone
 
 from .auth import user_is_manager, user_is_staff_or_manager
 from .models import (
     SINGLETON_PK,
     RestaurantSettings,
     RestaurantTable,
+    WaitlistEntry,
     WorkerProfile,
 )
 
@@ -128,6 +130,144 @@ class RestaurantTableModelTests(TestCase):
         self.assertIn('identifier', context.exception.message_dict)
         with self.assertRaises(IntegrityError):
             RestaurantTable.objects.create(identifier='Booth 1', capacity=6)
+
+
+class WaitlistEntryModelTests(TestCase):
+    def test_can_create_with_required_fields_and_defaults(self):
+        entry = WaitlistEntry.objects.create(
+            guest_name='Ada Lovelace',
+            party_size=3,
+        )
+
+        self.assertEqual(entry.guest_name, 'Ada Lovelace')
+        self.assertEqual(entry.party_size, 3)
+        self.assertEqual(entry.contact_text, '')
+        self.assertEqual(entry.preference_notes, '')
+        self.assertEqual(entry.priority_metadata, {})
+        self.assertIsNone(entry.assigned_table)
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+        self.assertIsNotNone(entry.checked_in_at)
+        self.assertIsNone(entry.notified_at)
+        self.assertIsNone(entry.arrived_at)
+        self.assertIsNone(entry.seated_at)
+        self.assertIsNone(entry.cancelled_at)
+        self.assertIsNone(entry.no_show_at)
+        self.assertIsNone(entry.left_at)
+        self.assertIsNotNone(entry.created_at)
+        self.assertIsNotNone(entry.updated_at)
+
+    def test_checked_in_at_is_automatic_but_can_be_explicitly_set(self):
+        explicit_check_in = timezone.now() - timezone.timedelta(days=1)
+
+        entry = WaitlistEntry.objects.create(
+            guest_name='Grace Hopper',
+            party_size=2,
+            checked_in_at=explicit_check_in,
+        )
+
+        self.assertEqual(entry.checked_in_at, explicit_check_in)
+
+    def test_lifecycle_timestamps_can_be_set_when_needed(self):
+        timestamp = timezone.now()
+
+        entry = WaitlistEntry.objects.create(
+            guest_name='Katherine Johnson',
+            party_size=4,
+            notified_at=timestamp,
+            arrived_at=timestamp,
+            seated_at=timestamp,
+            cancelled_at=timestamp,
+            no_show_at=timestamp,
+            left_at=timestamp,
+        )
+
+        self.assertEqual(entry.notified_at, timestamp)
+        self.assertEqual(entry.arrived_at, timestamp)
+        self.assertEqual(entry.seated_at, timestamp)
+        self.assertEqual(entry.cancelled_at, timestamp)
+        self.assertEqual(entry.no_show_at, timestamp)
+        self.assertEqual(entry.left_at, timestamp)
+
+    def test_rejects_non_positive_party_size(self):
+        for party_size in [0, -1]:
+            with self.subTest(party_size=party_size):
+                entry = WaitlistEntry(
+                    guest_name='Invalid Party',
+                    party_size=party_size,
+                )
+
+                with self.assertRaises(ValidationError) as context:
+                    entry.full_clean()
+
+                self.assertIn('party_size', context.exception.message_dict)
+
+    def test_assigned_table_links_to_restaurant_table(self):
+        table = RestaurantTable.objects.create(
+            identifier='Window 4',
+            capacity=4,
+        )
+
+        entry = WaitlistEntry.objects.create(
+            guest_name='Alan Turing',
+            party_size=2,
+            assigned_table=table,
+        )
+
+        self.assertEqual(entry.assigned_table, table)
+        self.assertEqual(list(table.waitlist_entries.all()), [entry])
+
+    def test_deleting_assigned_table_clears_reference_without_deleting_entry(self):
+        table = RestaurantTable.objects.create(
+            identifier='Patio 8',
+            capacity=6,
+        )
+        entry = WaitlistEntry.objects.create(
+            guest_name='Mary Jackson',
+            party_size=5,
+            assigned_table=table,
+        )
+
+        table.delete()
+        entry.refresh_from_db()
+
+        self.assertIsNone(entry.assigned_table)
+        self.assertEqual(
+            WaitlistEntry.objects.filter(guest_name='Mary Jackson').count(),
+            1,
+        )
+
+    def test_status_choices_cover_guest_lifecycle(self):
+        self.assertEqual(
+            set(WaitlistEntry.Status.values),
+            {
+                'waiting',
+                'notified',
+                'arrived',
+                'seated',
+                'late_demoted',
+                'cancelled',
+                'no_show',
+                'left',
+            },
+        )
+        self.assertEqual(
+            dict(WaitlistEntry.Status.choices),
+            {
+                'waiting': 'Waiting',
+                'notified': 'Notified',
+                'arrived': 'Arrived',
+                'seated': 'Seated',
+                'late_demoted': 'Late/Demoted',
+                'cancelled': 'Cancelled',
+                'no_show': 'No-show',
+                'left': 'Left',
+            },
+        )
+
+    def test_string_representation_includes_guest_name_and_party_size(self):
+        entry = WaitlistEntry(guest_name='Dorothy Vaughan', party_size=7)
+
+        self.assertEqual(str(entry), 'Dorothy Vaughan (7)')
 
 
 class WorkerAuthorizationTests(TestCase):
