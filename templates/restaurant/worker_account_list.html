@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - Worker Accounts{% endblock %}
+
+{% block content %}
+<h1 id="worker-account-list-marker" class="text-2xl font-bold">Worker Accounts</h1>
+<p class="mt-4">
+    <a href="{% url 'restaurant:worker_account_create' %}">Create worker account</a>
+</p>
+
+<table class="mt-4 w-full text-left">
+    <thead>
+        <tr>
+            <th>Username</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for worker in workers %}
+        <tr>
+            <td>{{ worker.user.username }}</td>
+            <td>
+                {% if worker.user.get_full_name %}
+                    {{ worker.user.get_full_name }}
+                {% else %}
+                    {{ worker.user.first_name }} {{ worker.user.last_name }}
+                {% endif %}
+            </td>
+            <td>{{ worker.user.email }}</td>
+            <td>{{ worker.get_role_display }}</td>
+            <td>{% if worker.user.is_active %}Active{% else %}Inactive{% endif %}</td>
+            <td>
+                <a href="{% url 'restaurant:worker_account_edit' worker.user.pk %}">Edit</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
