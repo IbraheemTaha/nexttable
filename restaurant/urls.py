@@ -67,4 +67,24 @@ urlpatterns = [
         views.table_config_remove,
         name='table_config_remove',
     ),
+    path(
+        'manager/eta/',
+        views.eta_config,
+        name='eta_config',
+    ),
+    path(
+        'manager/eta/rules/new/',
+        views.eta_rule_create,
+        name='eta_rule_create',
+    ),
+    path(
+        'manager/eta/rules/<int:rule_id>/edit/',
+        views.eta_rule_edit,
+        name='eta_rule_edit',
+    ),
+    path(
+        'manager/eta/grace-period/',
+        views.eta_grace_period_edit,
+        name='eta_grace_period_edit',
+    ),
 ]

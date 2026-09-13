@@ -7,12 +7,20 @@ from django.utils import timezone
 from .auth import manager_required, staff_or_manager_required
 from .check_in_tokens import is_valid_check_in_token
 from .forms import (
+    EtaRuleForm,
+    GracePeriodForm,
     GuestCheckInForm,
     RestaurantTableForm,
     WorkerAccountCreateForm,
     WorkerAccountEditForm,
 )
-from .models import RestaurantTable, WaitlistEntry, WorkerProfile
+from .models import (
+    EtaRule,
+    RestaurantSettings,
+    RestaurantTable,
+    WaitlistEntry,
+    WorkerProfile,
+)
 
 
 @staff_or_manager_required
@@ -308,4 +316,84 @@ def table_config_remove(request, table_id):
         request,
         'restaurant/table_config_confirm_remove.html',
         {'table': table},
+    )
+
+
+@manager_required
+def eta_config(request):
+    settings = RestaurantSettings.get_active()
+    rules = EtaRule.objects.order_by('min_party_size', 'max_party_size')
+    return render(
+        request,
+        'restaurant/eta_config.html',
+        {
+            'rules': rules,
+            'settings': settings,
+        },
+    )
+
+
+@manager_required
+def eta_rule_create(request):
+    if request.method == 'POST':
+        form = EtaRuleForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('restaurant:eta_config')
+    else:
+        form = EtaRuleForm(initial={'is_active': True})
+
+    return render(
+        request,
+        'restaurant/eta_rule_form.html',
+        {
+            'form': form,
+            'title': 'Create ETA Rule',
+            'submit_label': 'Create rule',
+        },
+    )
+
+
+@manager_required
+def eta_rule_edit(request, rule_id):
+    rule = get_object_or_404(EtaRule, pk=rule_id)
+    if request.method == 'POST':
+        form = EtaRuleForm(request.POST, instance=rule)
+        if form.is_valid():
+            form.save()
+            return redirect('restaurant:eta_config')
+    else:
+        form = EtaRuleForm(instance=rule)
+
+    return render(
+        request,
+        'restaurant/eta_rule_form.html',
+        {
+            'form': form,
+            'title': 'Edit ETA Rule',
+            'submit_label': 'Save changes',
+            'rule': rule,
+        },
+    )
+
+
+@manager_required
+def eta_grace_period_edit(request):
+    settings = RestaurantSettings.get_active()
+    if request.method == 'POST':
+        form = GracePeriodForm(request.POST, instance=settings)
+        if form.is_valid():
+            form.save()
+            return redirect('restaurant:eta_config')
+    else:
+        form = GracePeriodForm(instance=settings)
+
+    return render(
+        request,
+        'restaurant/eta_grace_period_form.html',
+        {
+            'form': form,
+            'title': 'Edit Grace Period',
+            'submit_label': 'Save changes',
+        },
     )

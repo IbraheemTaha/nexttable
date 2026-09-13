@@ -138,6 +138,54 @@ class RestaurantTable(models.Model):
         return f'{self.identifier} ({self.capacity})'
 
 
+class EtaRule(models.Model):
+    """Configured wait estimate input for a party-size range."""
+
+    min_party_size = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)]
+    )
+    max_party_size = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)],
+        blank=True,
+        null=True,
+    )
+    estimated_wait_minutes = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)]
+    )
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['min_party_size', 'max_party_size']
+
+    def clean(self):
+        super().clean()
+        if (
+            self.max_party_size is not None
+            and self.min_party_size is not None
+            and self.max_party_size < self.min_party_size
+        ):
+            raise ValidationError({
+                'max_party_size': (
+                    'Maximum party size must be greater than or equal to '
+                    'minimum party size.'
+                )
+            })
+
+    def __str__(self):
+        if self.max_party_size is None:
+            return (
+                f'{self.min_party_size}+ guests: '
+                f'{self.estimated_wait_minutes} minutes'
+            )
+        return (
+            f'{self.min_party_size}-{self.max_party_size} guests: '
+            f'{self.estimated_wait_minutes} minutes'
+        )
+
+
 class WaitlistEntry(models.Model):
     """Guest waitlist record for the core check-in lifecycle."""
 

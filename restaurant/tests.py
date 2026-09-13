@@ -16,6 +16,7 @@ from .check_in_tokens import (
     is_valid_check_in_token,
 )
 from .models import (
+    EtaRule,
     SINGLETON_PK,
     RestaurantSettings,
     RestaurantTable,
@@ -1537,3 +1538,364 @@ class TableConfigurationTests(TestCase):
                 )
                 self.assertContains(response, table.identifier)
                 self.assertTrue(RestaurantTable.objects.filter(pk=table.pk).exists())
+
+
+class DefaultEtaConfigurationTests(TestCase):
+    def test_default_eta_configuration_is_available_after_migrations(self):
+        self.assertEqual(RestaurantSettings.get_active().grace_period_minutes, 30)
+        self.assertTrue(
+            EtaRule.objects.filter(
+                min_party_size=1,
+                max_party_size=2,
+                estimated_wait_minutes=15,
+                is_active=True,
+            ).exists()
+        )
+        self.assertTrue(
+            EtaRule.objects.filter(
+                min_party_size=3,
+                max_party_size=4,
+                estimated_wait_minutes=25,
+                is_active=True,
+            ).exists()
+        )
+        self.assertTrue(
+            EtaRule.objects.filter(
+                min_party_size=5,
+                max_party_size=None,
+                estimated_wait_minutes=35,
+                is_active=True,
+            ).exists()
+        )
+
+
+class EtaConfigurationTests(TestCase):
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.manager_user = user_model.objects.create_user(
+            username='eta-manager',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.manager_user,
+            role=WorkerProfile.Role.MANAGER,
+        )
+        cls.staff_user = user_model.objects.create_user(
+            username='eta-staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+
+    def setUp(self):
+        EtaRule.objects.all().delete()
+        self.rule = EtaRule.objects.create(
+            min_party_size=1,
+            max_party_size=2,
+            estimated_wait_minutes=15,
+        )
+
+    def eta_urls(self):
+        return [
+            reverse('restaurant:eta_config'),
+            reverse('restaurant:eta_rule_create'),
+            reverse('restaurant:eta_rule_edit', args=[self.rule.pk]),
+            reverse('restaurant:eta_grace_period_edit'),
+        ]
+
+    def test_manager_can_view_eta_config(self):
+        settings = RestaurantSettings.get_active()
+        settings.grace_period_minutes = 30
+        settings.save()
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(reverse('restaurant:eta_config'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="eta-config-marker"')
+        self.assertContains(response, '1')
+        self.assertContains(response, '2')
+        self.assertContains(response, '15 minutes')
+        self.assertContains(response, 'Active')
+        self.assertContains(response, '30 minutes')
+        self.assertContains(response, reverse('restaurant:eta_rule_create'))
+        self.assertContains(
+            response,
+            reverse('restaurant:eta_rule_edit', args=[self.rule.pk]),
+        )
+        self.assertContains(response, reverse('restaurant:eta_grace_period_edit'))
+
+    def test_manager_landing_links_to_eta_config(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(reverse('restaurant:manager_landing'))
+
+        self.assertContains(response, reverse('restaurant:eta_config'))
+
+    def test_staff_user_is_denied_eta_config_pages(self):
+        self.client.force_login(self.staff_user)
+
+        for url in self.eta_urls():
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 403)
+
+                post_response = self.client.post(url, {})
+                self.assertEqual(post_response.status_code, 403)
+
+    def test_anonymous_user_is_redirected_from_eta_config_pages(self):
+        for url in self.eta_urls():
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assertEqual(response.status_code, 302)
+                self.assertIn(reverse('login'), response['Location'])
+                self.assertIn(f'next={url}', response['Location'])
+
+    def test_manager_can_create_bounded_eta_rule(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:eta_rule_create'),
+            {
+                'min_party_size': '3',
+                'max_party_size': '4',
+                'estimated_wait_minutes': '25',
+                'is_active': 'on',
+            },
+        )
+
+        self.assertRedirects(response, reverse('restaurant:eta_config'))
+        rule = EtaRule.objects.get(min_party_size=3)
+        self.assertEqual(rule.max_party_size, 4)
+        self.assertEqual(rule.estimated_wait_minutes, 25)
+        self.assertTrue(rule.is_active)
+
+    def test_manager_can_create_open_ended_eta_rule(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:eta_rule_create'),
+            {
+                'min_party_size': '5',
+                'max_party_size': '',
+                'estimated_wait_minutes': '35',
+                'is_active': 'on',
+            },
+        )
+
+        self.assertRedirects(response, reverse('restaurant:eta_config'))
+        rule = EtaRule.objects.get(min_party_size=5)
+        self.assertIsNone(rule.max_party_size)
+        self.assertEqual(rule.estimated_wait_minutes, 35)
+
+    def test_manager_can_edit_eta_rule(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:eta_rule_edit', args=[self.rule.pk]),
+            {
+                'min_party_size': '2',
+                'max_party_size': '3',
+                'estimated_wait_minutes': '20',
+                'is_active': '',
+            },
+        )
+
+        self.assertRedirects(response, reverse('restaurant:eta_config'))
+        self.rule.refresh_from_db()
+        self.assertEqual(self.rule.min_party_size, 2)
+        self.assertEqual(self.rule.max_party_size, 3)
+        self.assertEqual(self.rule.estimated_wait_minutes, 20)
+        self.assertFalse(self.rule.is_active)
+        self.assertEqual(EtaRule.objects.count(), 1)
+
+    def test_eta_rule_rejects_required_and_non_positive_values(self):
+        self.client.force_login(self.manager_user)
+        cases = [
+            (
+                {
+                    'min_party_size': '',
+                    'max_party_size': '2',
+                    'estimated_wait_minutes': '15',
+                    'is_active': 'on',
+                },
+                'This field is required.',
+            ),
+            (
+                {
+                    'min_party_size': '0',
+                    'max_party_size': '2',
+                    'estimated_wait_minutes': '15',
+                    'is_active': 'on',
+                },
+                'Minimum party size must be greater than zero.',
+            ),
+            (
+                {
+                    'min_party_size': '3',
+                    'max_party_size': '0',
+                    'estimated_wait_minutes': '15',
+                    'is_active': 'on',
+                },
+                'Maximum party size must be greater than zero.',
+            ),
+            (
+                {
+                    'min_party_size': '4',
+                    'max_party_size': '3',
+                    'estimated_wait_minutes': '15',
+                    'is_active': 'on',
+                },
+                'Maximum party size must be greater than or equal to minimum party size.',
+            ),
+            (
+                {
+                    'min_party_size': '3',
+                    'max_party_size': '4',
+                    'estimated_wait_minutes': '',
+                    'is_active': 'on',
+                },
+                'This field is required.',
+            ),
+            (
+                {
+                    'min_party_size': '3',
+                    'max_party_size': '4',
+                    'estimated_wait_minutes': '0',
+                    'is_active': 'on',
+                },
+                'Estimated wait minutes must be greater than zero.',
+            ),
+        ]
+
+        for data, error in cases:
+            with self.subTest(data=data):
+                response = self.client.post(
+                    reverse('restaurant:eta_rule_create'),
+                    data,
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, error)
+
+        self.assertEqual(EtaRule.objects.count(), 1)
+
+    def test_eta_rule_rejects_overlapping_active_ranges(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:eta_rule_create'),
+            {
+                'min_party_size': '2',
+                'max_party_size': '4',
+                'estimated_wait_minutes': '25',
+                'is_active': 'on',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Active party-size ETA rules cannot overlap.')
+        self.assertEqual(EtaRule.objects.count(), 1)
+
+    def test_eta_rule_permits_adjacent_non_overlapping_ranges(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:eta_rule_create'),
+            {
+                'min_party_size': '3',
+                'max_party_size': '4',
+                'estimated_wait_minutes': '25',
+                'is_active': 'on',
+            },
+        )
+
+        self.assertRedirects(response, reverse('restaurant:eta_config'))
+        self.assertTrue(
+            EtaRule.objects.filter(min_party_size=3, max_party_size=4).exists()
+        )
+
+    def test_eta_rule_rejects_overlap_with_open_ended_rule(self):
+        EtaRule.objects.create(
+            min_party_size=5,
+            max_party_size=None,
+            estimated_wait_minutes=35,
+        )
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:eta_rule_create'),
+            {
+                'min_party_size': '6',
+                'max_party_size': '8',
+                'estimated_wait_minutes': '45',
+                'is_active': 'on',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Active party-size ETA rules cannot overlap.')
+        self.assertFalse(EtaRule.objects.filter(min_party_size=6).exists())
+
+    def test_eta_rule_permits_inactive_overlapping_and_second_open_ended_rule(self):
+        EtaRule.objects.create(
+            min_party_size=5,
+            max_party_size=None,
+            estimated_wait_minutes=35,
+        )
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:eta_rule_create'),
+            {
+                'min_party_size': '6',
+                'max_party_size': '',
+                'estimated_wait_minutes': '45',
+                'is_active': '',
+            },
+        )
+
+        self.assertRedirects(response, reverse('restaurant:eta_config'))
+        inactive_rule = EtaRule.objects.get(min_party_size=6)
+        self.assertIsNone(inactive_rule.max_party_size)
+        self.assertFalse(inactive_rule.is_active)
+
+    def test_grace_period_update_and_validation(self):
+        settings = RestaurantSettings.get_active()
+        settings.grace_period_minutes = 30
+        settings.save()
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:eta_grace_period_edit'),
+            {'grace_period_minutes': '45'},
+        )
+
+        self.assertRedirects(response, reverse('restaurant:eta_config'))
+        settings.refresh_from_db()
+        self.assertEqual(settings.grace_period_minutes, 45)
+
+        invalid_cases = [
+            ('', 'This field is required.'),
+            ('0', 'Grace period must be greater than zero minutes.'),
+            ('-1', 'Grace period must be greater than zero minutes.'),
+            ('241', 'Grace period cannot exceed 240 minutes.'),
+        ]
+        for value, error in invalid_cases:
+            with self.subTest(value=value):
+                response = self.client.post(
+                    reverse('restaurant:eta_grace_period_edit'),
+                    {'grace_period_minutes': value},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, error)
+
+        settings.refresh_from_db()
+        self.assertEqual(settings.grace_period_minutes, 45)

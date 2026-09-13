@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    EtaRule,
     RestaurantSettings,
     RestaurantTable,
     WaitlistEntry,
@@ -47,6 +48,19 @@ class RestaurantTableAdmin(admin.ModelAdmin):
     list_display = ('identifier', 'capacity', 'status', 'updated_at')
     list_filter = ('status', 'capacity')
     search_fields = ('identifier',)
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(EtaRule)
+class EtaRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        'min_party_size',
+        'max_party_size',
+        'estimated_wait_minutes',
+        'is_active',
+        'updated_at',
+    )
+    list_filter = ('is_active',)
     readonly_fields = ('created_at', 'updated_at')
 
 

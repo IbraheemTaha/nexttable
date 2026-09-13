@@ -2,7 +2,13 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 
-from .models import RestaurantTable, WaitlistEntry, WorkerProfile
+from .models import (
+    EtaRule,
+    RestaurantSettings,
+    RestaurantTable,
+    WaitlistEntry,
+    WorkerProfile,
+)
 
 
 LOCATION_PREFERENCE_CHOICES = (
@@ -20,6 +26,7 @@ HIGH_CHAIR_CHOICES = (
     ('no', 'No'),
     ('yes', 'Yes'),
 )
+MAX_GRACE_PERIOD_MINUTES = 240
 
 
 ROLE_CHOICES = (
@@ -153,6 +160,106 @@ class RestaurantTableForm(forms.ModelForm):
         if capacity <= 0:
             raise forms.ValidationError('Capacity must be greater than zero.')
         return capacity
+
+
+class EtaRuleForm(forms.ModelForm):
+    class Meta:
+        model = EtaRule
+        fields = [
+            'min_party_size',
+            'max_party_size',
+            'estimated_wait_minutes',
+            'is_active',
+        ]
+
+    def clean_min_party_size(self):
+        min_party_size = self.cleaned_data['min_party_size']
+        if min_party_size <= 0:
+            raise forms.ValidationError(
+                'Minimum party size must be greater than zero.'
+            )
+        return min_party_size
+
+    def clean_max_party_size(self):
+        max_party_size = self.cleaned_data.get('max_party_size')
+        if max_party_size is not None and max_party_size <= 0:
+            raise forms.ValidationError(
+                'Maximum party size must be greater than zero.'
+            )
+        return max_party_size
+
+    def clean_estimated_wait_minutes(self):
+        estimated_wait_minutes = self.cleaned_data['estimated_wait_minutes']
+        if estimated_wait_minutes <= 0:
+            raise forms.ValidationError(
+                'Estimated wait minutes must be greater than zero.'
+            )
+        return estimated_wait_minutes
+
+    def clean(self):
+        cleaned_data = super().clean()
+        min_party_size = cleaned_data.get('min_party_size')
+        max_party_size = cleaned_data.get('max_party_size')
+        is_active = cleaned_data.get('is_active')
+
+        if (
+            min_party_size is not None
+            and max_party_size is not None
+            and max_party_size < min_party_size
+        ):
+            self.add_error(
+                'max_party_size',
+                (
+                    'Maximum party size must be greater than or equal to '
+                    'minimum party size.'
+                ),
+            )
+
+        if min_party_size is not None and is_active:
+            overlapping_rules = EtaRule.objects.filter(is_active=True)
+            if self.instance.pk:
+                overlapping_rules = overlapping_rules.exclude(pk=self.instance.pk)
+
+            for rule in overlapping_rules:
+                if _eta_ranges_overlap(
+                    min_party_size,
+                    max_party_size,
+                    rule.min_party_size,
+                    rule.max_party_size,
+                ):
+                    self.add_error(
+                        None,
+                        'Active party-size ETA rules cannot overlap.',
+                    )
+                    break
+
+        return cleaned_data
+
+
+def _eta_ranges_overlap(first_min, first_max, second_min, second_max):
+    first_upper = first_max if first_max is not None else float('inf')
+    second_upper = second_max if second_max is not None else float('inf')
+    return first_min <= second_upper and second_min <= first_upper
+
+
+class GracePeriodForm(forms.ModelForm):
+    grace_period_minutes = forms.IntegerField()
+
+    class Meta:
+        model = RestaurantSettings
+        fields = ['grace_period_minutes']
+
+    def clean_grace_period_minutes(self):
+        grace_period_minutes = self.cleaned_data['grace_period_minutes']
+        if grace_period_minutes <= 0:
+            raise forms.ValidationError(
+                'Grace period must be greater than zero minutes.'
+            )
+        if grace_period_minutes > MAX_GRACE_PERIOD_MINUTES:
+            raise forms.ValidationError(
+                f'Grace period cannot exceed {MAX_GRACE_PERIOD_MINUTES} minutes.'
+            )
+        return grace_period_minutes
 
 
 class GuestCheckInForm(forms.Form):

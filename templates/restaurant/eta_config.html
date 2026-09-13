@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - ETA Configuration{% endblock %}
+
+{% block content %}
+<h1 id="eta-config-marker" class="text-2xl font-bold">ETA Configuration</h1>
+
+<section class="mt-4">
+    <h2 class="text-xl font-semibold">Grace period</h2>
+    <p>Notified guest grace period: {{ settings.grace_period_minutes }} minutes</p>
+    <p>
+        <a href="{% url 'restaurant:eta_grace_period_edit' %}">Edit grace period</a>
+    </p>
+</section>
+
+<section class="mt-6">
+    <h2 class="text-xl font-semibold">Party-size ETA rules</h2>
+    <p class="mt-2">
+        <a href="{% url 'restaurant:eta_rule_create' %}">Create ETA rule</a>
+    </p>
+
+    <table class="mt-4 w-full text-left">
+        <thead>
+            <tr>
+                <th>Minimum party size</th>
+                <th>Maximum party size</th>
+                <th>Estimated wait</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rule in rules %}
+            <tr>
+                <td>{{ rule.min_party_size }}</td>
+                <td>
+                    {% if rule.max_party_size %}
+                        {{ rule.max_party_size }}
+                    {% else %}
+                        Open-ended
+                    {% endif %}
+                </td>
+                <td>{{ rule.estimated_wait_minutes }} minutes</td>
+                <td>
+                    {% if rule.is_active %}
+                        Active
+                    {% else %}
+                        Inactive
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{% url 'restaurant:eta_rule_edit' rule.pk %}">Edit</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5">No ETA rules configured.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}
