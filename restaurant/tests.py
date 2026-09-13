@@ -42,3 +42,24 @@ class RestaurantSettingsGetActiveTests(TestCase):
 
         self.assertEqual(settings.pk, SINGLETON_PK)
         self.assertEqual(RestaurantSettings.objects.count(), 1)
+
+    def test_saving_a_freshly_constructed_instance_updates_existing_row(self):
+        # Regression test for QA FAIL on issue #3: constructing a fresh
+        # RestaurantSettings instance directly (not via get_active()) while
+        # a settings row already exists used to crash with an
+        # IntegrityError, because the forced pk routed the save() to an
+        # UPDATE, and `created_at` (auto_now_add) is never populated on an
+        # UPDATE, so the NOT NULL column got a NULL write attempt.
+        first = RestaurantSettings.get_active()
+        original_created_at = first.created_at
+
+        second = RestaurantSettings(name='Second Attempt')
+        second.save()  # must not raise IntegrityError
+
+        self.assertEqual(RestaurantSettings.objects.count(), 1)
+        self.assertEqual(second.pk, SINGLETON_PK)
+
+        refreshed = RestaurantSettings.get_active()
+        self.assertEqual(refreshed.pk, SINGLETON_PK)
+        self.assertEqual(refreshed.name, 'Second Attempt')
+        self.assertEqual(refreshed.created_at, original_created_at)

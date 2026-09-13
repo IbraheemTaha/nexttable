@@ -43,6 +43,26 @@ class RestaurantSettings(models.Model):
         # primary key so there can only ever be one RestaurantSettings row,
         # no matter how this instance was constructed.
         self.pk = SINGLETON_PK
+
+        # If this instance was constructed directly (e.g.
+        # RestaurantSettings(name=...)) rather than via get_active(), it
+        # has no `created_at` set. Forcing the pk above means that, when a
+        # row already exists, Django routes this save() to an UPDATE
+        # (matching the existing pk) rather than an INSERT. `created_at`
+        # is `auto_now_add`, which Django only populates on INSERT, so on
+        # the UPDATE path it would stay None and the database would
+        # reject the NULL write with an IntegrityError. Preserve the
+        # existing row's `created_at` in that case so the UPDATE succeeds
+        # and doesn't clobber the original creation timestamp.
+        if self.created_at is None:
+            existing_created_at = (
+                RestaurantSettings.objects.filter(pk=SINGLETON_PK)
+                .values_list('created_at', flat=True)
+                .first()
+            )
+            if existing_created_at is not None:
+                self.created_at = existing_created_at
+
         super().save(*args, **kwargs)
 
     @classmethod
