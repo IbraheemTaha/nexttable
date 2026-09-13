@@ -66,6 +66,57 @@ def check_table_compatibility(table, waitlist_entry):
     return True
 
 
+def select_next_guest_for_table(table):
+    """Select the highest-priority eligible waiting guest for a table.
+
+    Considers only WaitlistEntry rows with status ``waiting`` or
+    ``late_demoted`` that are compatible with the given table (per
+    `check_table_compatibility`). Normal waiting guests are ranked ahead
+    of late_demoted guests regardless of check-in time; within each
+    group, the earliest checked_in_at wins.
+
+    This function is read-only: it does not mutate any waitlist or table
+    rows, assign a table, or change any statuses. Actually assigning the
+    table and transitioning statuses is out of scope (see #18).
+
+    Args:
+        table: RestaurantTable instance to find a guest for.
+
+    Returns:
+        The highest-priority compatible WaitlistEntry, or None if no
+        eligible guest exists.
+
+    Raises:
+        TypeError: If table is not a RestaurantTable instance.
+    """
+    if not isinstance(table, RestaurantTable):
+        raise TypeError('table must be a RestaurantTable instance')
+
+    candidates = WaitlistEntry.objects.filter(
+        Q(status=WaitlistEntry.Status.WAITING)
+        | Q(status=WaitlistEntry.Status.LATE_DEMOTED)
+    ).order_by('checked_in_at')
+
+    best_entry = None
+    best_rank = None
+    for entry in candidates:
+        if not check_table_compatibility(table, entry):
+            continue
+
+        # Rank 0 for normal waiting guests, 1 for late_demoted, so that
+        # waiting guests always sort ahead of late_demoted guests.
+        rank = (
+            0 if entry.status == WaitlistEntry.Status.WAITING else 1,
+            entry.checked_in_at,
+        )
+
+        if best_rank is None or rank < best_rank:
+            best_rank = rank
+            best_entry = entry
+
+    return best_entry
+
+
 def _guest_needs_accessibility(waitlist_entry):
     """Check if guest has accessibility requirements.
 

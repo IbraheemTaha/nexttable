@@ -23,7 +23,11 @@ from .models import (
     WaitlistEntry,
     WorkerProfile,
 )
-from .services import calculate_estimated_wait_minutes, check_table_compatibility
+from .services import (
+    calculate_estimated_wait_minutes,
+    check_table_compatibility,
+    select_next_guest_for_table,
+)
 
 
 class CheckInTokenTests(TestCase):
@@ -2629,3 +2633,127 @@ class TableCompatibilityTests(TestCase):
         self.assertEqual(entry.party_size, original_party_size)
         self.assertEqual(self.indoor_table.capacity, original_table_capacity)
         self.assertEqual(self.indoor_table.location, original_table_location)
+
+
+class SelectNextGuestForTableTests(TestCase):
+    """Tests for the select_next_guest_for_table service function."""
+
+    def setUp(self):
+        """Set up a clean table and waitlist state for each test."""
+        WaitlistEntry.objects.all().delete()
+        RestaurantTable.objects.all().delete()
+
+        self.table = RestaurantTable.objects.create(
+            identifier='Standard Table',
+            capacity=4,
+            location=RestaurantTable.Location.ANY,
+            seating_type=RestaurantTable.SeatingType.STANDARD,
+            has_accessibility=False,
+            can_accommodate_high_chair=False,
+        )
+
+    def _make_entry(self, name, minutes_ago, status=WaitlistEntry.Status.WAITING,
+                     party_size=2, preference_notes=''):
+        checked_in_at = timezone.now() - timezone.timedelta(minutes=minutes_ago)
+        return WaitlistEntry.objects.create(
+            guest_name=name,
+            party_size=party_size,
+            status=status,
+            checked_in_at=checked_in_at,
+            preference_notes=preference_notes,
+        )
+
+    def test_type_checking_rejects_non_table_argument(self):
+        """Function should raise TypeError if table is not RestaurantTable."""
+        with self.assertRaises(TypeError):
+            select_next_guest_for_table('not a table')
+
+    def test_single_eligible_guest_is_returned(self):
+        """A single eligible waiting guest should be selected."""
+        entry = self._make_entry('Alice', minutes_ago=10)
+        result = select_next_guest_for_table(self.table)
+        self.assertEqual(result, entry)
+
+    def test_no_eligible_guests_returns_none(self):
+        """No waitlist entries at all should return None."""
+        self.assertIsNone(select_next_guest_for_table(self.table))
+
+    def test_multiple_waiting_guests_ranked_by_check_in_time(self):
+        """Among waiting guests, the earliest checked_in_at wins."""
+        newer = self._make_entry('Bob', minutes_ago=5)
+        older = self._make_entry('Alice', minutes_ago=20)
+        middle = self._make_entry('Carol', minutes_ago=10)
+
+        result = select_next_guest_for_table(self.table)
+
+        self.assertEqual(result, older)
+        self.assertNotEqual(result, newer)
+        self.assertNotEqual(result, middle)
+
+    def test_late_demoted_ranked_behind_all_waiting_guests(self):
+        """A late_demoted guest is ranked behind waiting guests even if
+        the late_demoted guest checked in much earlier."""
+        very_old_late_demoted = self._make_entry(
+            'Dave', minutes_ago=100, status=WaitlistEntry.Status.LATE_DEMOTED
+        )
+        recent_waiting = self._make_entry('Eve', minutes_ago=1)
+
+        result = select_next_guest_for_table(self.table)
+
+        self.assertEqual(result, recent_waiting)
+        self.assertNotEqual(result, very_old_late_demoted)
+
+    def test_among_late_demoted_oldest_check_in_wins(self):
+        """When only late_demoted guests are eligible, the oldest wins."""
+        older_late_demoted = self._make_entry(
+            'Frank', minutes_ago=50, status=WaitlistEntry.Status.LATE_DEMOTED
+        )
+        newer_late_demoted = self._make_entry(
+            'Grace', minutes_ago=10, status=WaitlistEntry.Status.LATE_DEMOTED
+        )
+
+        result = select_next_guest_for_table(self.table)
+
+        self.assertEqual(result, older_late_demoted)
+        self.assertNotEqual(result, newer_late_demoted)
+
+    def test_incompatible_guests_are_excluded(self):
+        """Guests incompatible with the table (e.g. party too large) are
+        excluded even if they would otherwise rank first."""
+        incompatible = self._make_entry(
+            'Huge Party', minutes_ago=100, party_size=10
+        )
+        compatible = self._make_entry('Small Party', minutes_ago=5, party_size=2)
+
+        result = select_next_guest_for_table(self.table)
+
+        self.assertEqual(result, compatible)
+        self.assertNotEqual(result, incompatible)
+
+    def test_other_statuses_are_excluded(self):
+        """Entries with statuses other than waiting/late_demoted are
+        excluded entirely."""
+        self._make_entry('Seated', minutes_ago=100, status=WaitlistEntry.Status.SEATED)
+        self._make_entry('Cancelled', minutes_ago=100, status=WaitlistEntry.Status.CANCELLED)
+        self._make_entry('Notified', minutes_ago=100, status=WaitlistEntry.Status.NOTIFIED)
+
+        result = select_next_guest_for_table(self.table)
+
+        self.assertIsNone(result)
+
+    def test_function_does_not_mutate_or_assign(self):
+        """Function should not change the table or entry statuses/fields."""
+        entry = self._make_entry('Alice', minutes_ago=10)
+        original_status = entry.status
+        original_assigned_table = entry.assigned_table
+        original_table_status = self.table.status
+
+        select_next_guest_for_table(self.table)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+
+        self.assertEqual(entry.status, original_status)
+        self.assertEqual(entry.assigned_table, original_assigned_table)
+        self.assertIsNone(entry.assigned_table)
+        self.assertEqual(self.table.status, original_table_status)
