@@ -4541,6 +4541,78 @@ class DemoteLateGuestsServiceTests(TestCase):
         self.assertEqual(second_run, [])
         self.assertEqual(entry.status, WaitlistEntry.Status.LATE_DEMOTED)
 
+    def test_multiple_late_guests_are_all_demoted_and_rematched_independently(self):
+        """A single call demotes every guest past their grace period, and
+        each one's freed table is independently re-matched to the correct
+        waiting guest (not just the first late guest processed)."""
+        table_a = self._make_table(RestaurantTable.Status.RESERVED, identifier='A')
+        table_b = self._make_table(RestaurantTable.Status.RESERVED, identifier='B')
+
+        late_entry_a = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=45),
+            assigned_table=table_a,
+            guest_name='Late A',
+        )
+        late_entry_b = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=60),
+            assigned_table=table_b,
+            guest_name='Late B',
+        )
+        still_within_grace = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=5),
+            guest_name='Still Notified',
+        )
+        waiting_for_a = WaitlistEntry.objects.create(
+            guest_name='Waiting For A',
+            party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=timezone.now() - timezone.timedelta(minutes=8),
+        )
+        waiting_for_b = WaitlistEntry.objects.create(
+            guest_name='Waiting For B',
+            party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=timezone.now() - timezone.timedelta(minutes=6),
+        )
+
+        demoted = demote_late_guests()
+
+        self.assertCountEqual(
+            [e.pk for e in demoted], [late_entry_a.pk, late_entry_b.pk]
+        )
+
+        late_entry_a.refresh_from_db()
+        late_entry_b.refresh_from_db()
+        still_within_grace.refresh_from_db()
+        table_a.refresh_from_db()
+        table_b.refresh_from_db()
+        waiting_for_a.refresh_from_db()
+        waiting_for_b.refresh_from_db()
+
+        self.assertEqual(late_entry_a.status, WaitlistEntry.Status.LATE_DEMOTED)
+        self.assertEqual(late_entry_b.status, WaitlistEntry.Status.LATE_DEMOTED)
+        self.assertIsNone(late_entry_a.assigned_table)
+        self.assertIsNone(late_entry_b.assigned_table)
+        self.assertEqual(
+            still_within_grace.status, WaitlistEntry.Status.NOTIFIED
+        )
+
+        # Each freed table is independently re-matched to a waiting guest
+        # (processing one late guest's rematch does not interfere with or
+        # skip the other's), and no waiting guest is double-booked.
+        self.assertEqual(table_a.status, RestaurantTable.Status.RESERVED)
+        self.assertEqual(table_b.status, RestaurantTable.Status.RESERVED)
+        self.assertEqual(waiting_for_a.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertEqual(waiting_for_b.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertIn(waiting_for_a.assigned_table, [table_a, table_b])
+        self.assertIn(waiting_for_b.assigned_table, [table_a, table_b])
+        self.assertNotEqual(
+            waiting_for_a.assigned_table, waiting_for_b.assigned_table
+        )
+
 
 class SeedDemoDataCommandTests(TestCase):
     def test_creates_expected_records(self):
