@@ -29,6 +29,7 @@ from .services import (
     assign_table_manually,
     calculate_estimated_wait_minutes,
     check_table_compatibility,
+    demote_late_guests,
     mark_guest_arrived,
     mark_guest_cancelled,
     mark_guest_left,
@@ -4158,3 +4159,166 @@ class ManualTableAssignmentViewTests(TestCase):
 
         self.entry.refresh_from_db()
         self.assertIsNone(self.entry.assigned_table)
+
+
+class DemoteLateGuestsServiceTests(TestCase):
+    """Tests for the demote_late_guests service function (#25)."""
+
+    def setUp(self):
+        WaitlistEntry.objects.all().delete()
+        RestaurantTable.objects.all().delete()
+        RestaurantSettings.objects.all().delete()
+        RestaurantSettings.objects.create(
+            pk=SINGLETON_PK, name='Test Restaurant', grace_period_minutes=30
+        )
+
+    def _make_table(self, status=RestaurantTable.Status.RESERVED, **kwargs):
+        defaults = dict(
+            identifier='Demotion-Table',
+            capacity=4,
+            status=status,
+            location=RestaurantTable.Location.ANY,
+            seating_type=RestaurantTable.SeatingType.STANDARD,
+            has_accessibility=False,
+            can_accommodate_high_chair=False,
+        )
+        defaults.update(kwargs)
+        return RestaurantTable.objects.create(**defaults)
+
+    def _make_entry(self, status, notified_at=None, **kwargs):
+        defaults = dict(
+            guest_name='Guest',
+            party_size=2,
+            status=status,
+            checked_in_at=timezone.now() - timezone.timedelta(minutes=60),
+            notified_at=notified_at,
+        )
+        defaults.update(kwargs)
+        return WaitlistEntry.objects.create(**defaults)
+
+    def test_guest_past_grace_period_is_demoted(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=31),
+        )
+
+        demoted = demote_late_guests()
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.LATE_DEMOTED)
+        self.assertEqual([e.pk for e in demoted], [entry.pk])
+
+    def test_guest_within_grace_period_is_not_demoted(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=10),
+        )
+
+        demoted = demote_late_guests()
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertEqual(demoted, [])
+
+    def test_demotion_preserves_other_fields(self):
+        checked_in = timezone.now() - timezone.timedelta(minutes=90)
+        notified_at = timezone.now() - timezone.timedelta(minutes=45)
+        entry = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED,
+            notified_at=notified_at,
+            checked_in_at=checked_in,
+            guest_name='Preserve Me',
+            party_size=3,
+        )
+
+        demote_late_guests()
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.LATE_DEMOTED)
+        self.assertEqual(entry.guest_name, 'Preserve Me')
+        self.assertEqual(entry.party_size, 3)
+        self.assertEqual(entry.checked_in_at, checked_in)
+        self.assertEqual(entry.notified_at, notified_at)
+
+    def test_demotion_frees_and_rematches_table(self):
+        table = self._make_table(RestaurantTable.Status.RESERVED)
+        late_entry = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=45),
+            assigned_table=table,
+        )
+        waiting_entry = WaitlistEntry.objects.create(
+            guest_name='Waiting Guest',
+            party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=timezone.now() - timezone.timedelta(minutes=5),
+        )
+
+        demote_late_guests()
+
+        late_entry.refresh_from_db()
+        waiting_entry.refresh_from_db()
+        table.refresh_from_db()
+        self.assertEqual(late_entry.status, WaitlistEntry.Status.LATE_DEMOTED)
+        self.assertIsNone(late_entry.assigned_table)
+        self.assertEqual(table.status, RestaurantTable.Status.RESERVED)
+        self.assertEqual(waiting_entry.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertEqual(waiting_entry.assigned_table, table)
+
+    def test_demotion_with_no_compatible_guest_leaves_table_free(self):
+        table = self._make_table(RestaurantTable.Status.RESERVED, capacity=2)
+        late_entry = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=45),
+            assigned_table=table,
+            # Party size exceeds the freed table's capacity, so the
+            # demoted guest itself is not re-matched to it even though
+            # late_demoted guests are otherwise match-eligible.
+            party_size=4,
+        )
+
+        demote_late_guests()
+
+        late_entry.refresh_from_db()
+        table.refresh_from_db()
+        self.assertEqual(late_entry.status, WaitlistEntry.Status.LATE_DEMOTED)
+        self.assertIsNone(late_entry.assigned_table)
+        self.assertEqual(table.status, RestaurantTable.Status.FREE)
+
+    def test_already_demoted_guest_is_not_reprocessed(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.LATE_DEMOTED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=45),
+        )
+
+        demoted = demote_late_guests()
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.LATE_DEMOTED)
+        self.assertEqual(demoted, [])
+
+    def test_non_notified_guest_is_untouched(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.WAITING,
+            notified_at=timezone.now() - timezone.timedelta(minutes=45),
+        )
+
+        demoted = demote_late_guests()
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+        self.assertEqual(demoted, [])
+
+    def test_calling_repeatedly_is_safe(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=45),
+        )
+
+        first_run = demote_late_guests()
+        second_run = demote_late_guests()
+
+        entry.refresh_from_db()
+        self.assertEqual(len(first_run), 1)
+        self.assertEqual(second_run, [])
+        self.assertEqual(entry.status, WaitlistEntry.Status.LATE_DEMOTED)

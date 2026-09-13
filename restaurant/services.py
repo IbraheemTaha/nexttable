@@ -11,7 +11,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import EtaRule, RestaurantTable, WaitlistEntry
+from .models import EtaRule, RestaurantSettings, RestaurantTable, WaitlistEntry
 
 
 def check_table_compatibility(table, waitlist_entry):
@@ -160,6 +160,57 @@ def match_table_automatically(table):
         table.save(update_fields=['status', 'updated_at'])
 
     return matched_entry
+
+
+def demote_late_guests():
+    """Demote notified guests whose grace period has expired.
+
+    Finds every WaitlistEntry whose status is ``notified`` and whose
+    `notified_at` timestamp is more than
+    `RestaurantSettings.get_active().grace_period_minutes` minutes in the
+    past, and transitions each one to `late_demoted`. No other fields on
+    the entry (guest_name, party_size, checked_in_at, notified_at, etc.)
+    are modified, so the guest keeps their place in line per #17.
+
+    If a demoted guest had an `assigned_table`, that table is freed (its
+    `assigned_table` reference on the entry is cleared and the table's
+    status is set to free) and `match_table_automatically` (#18) is
+    invoked for it immediately so another eligible guest can be matched
+    to it right away.
+
+    This function only ever acts on guests currently in the `notified`
+    status, so it is safe to call repeatedly (e.g. on a schedule or on
+    each dashboard load): guests already demoted, or still within their
+    grace period, are left untouched.
+
+    Returns:
+        A list of the WaitlistEntry instances that were demoted.
+    """
+    grace_period_minutes = RestaurantSettings.get_active().grace_period_minutes
+    cutoff = timezone.now() - timezone.timedelta(minutes=grace_period_minutes)
+
+    late_entries = WaitlistEntry.objects.filter(
+        status=WaitlistEntry.Status.NOTIFIED,
+        notified_at__lt=cutoff,
+    )
+
+    demoted_entries = []
+    for entry in late_entries:
+        with transaction.atomic():
+            freed_table = entry.assigned_table
+
+            entry.status = WaitlistEntry.Status.LATE_DEMOTED
+            entry.assigned_table = None
+            entry.save(update_fields=['status', 'assigned_table', 'updated_at'])
+
+            if freed_table is not None:
+                freed_table.status = RestaurantTable.Status.FREE
+                freed_table.save(update_fields=['status', 'updated_at'])
+                match_table_automatically(freed_table)
+
+        demoted_entries.append(entry)
+
+    return demoted_entries
 
 
 class InvalidStatusTransitionError(ValidationError):
