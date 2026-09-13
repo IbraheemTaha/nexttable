@@ -2,20 +2,22 @@
 
 {% block title %}NextTable - Table Status{% endblock %}
 
+{% block app_header %}{% include "restaurant/_staff_header.html" %}{% endblock %}
+
 {% block content %}
-<h1 id="table-status-marker" class="text-2xl font-bold">Table Status</h1>
+<h1 id="table-status-marker" class="page-title">Table status</h1>
 
 {% if messages %}
-<ul id="table-status-messages" class="mt-4">
+<ul id="table-status-messages" class="mt-4 space-y-2">
     {% for message in messages %}
-    <li class="{% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</li>
+    <li class="app-message {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</li>
     {% endfor %}
 </ul>
 {% endif %}
 
 <div
     id="table-status-content"
-    class="mt-4"
+    class="mt-6"
     hx-get="{% url 'restaurant:table_status_partial' %}"
     hx-trigger="load, every 15s"
     hx-swap="innerHTML"
@@ -24,6 +26,6 @@
 </div>
 
 <p class="mt-6">
-    <a href="{% url 'restaurant:staff_landing' %}" class="text-blue-600 hover:underline">Back to dashboard</a>
+    <a href="{% url 'restaurant:staff_landing' %}" class="link">&larr; Back to dashboard</a>
 </p>
 {% endblock %}

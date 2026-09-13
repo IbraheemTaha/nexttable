@@ -2,13 +2,15 @@
 
 {% block title %}NextTable - Worker Accounts{% endblock %}
 
-{% block content %}
-<h1 id="worker-account-list-marker" class="text-2xl font-bold">Worker Accounts</h1>
-<p class="mt-4">
-    <a href="{% url 'restaurant:worker_account_create' %}">Create worker account</a>
-</p>
+{% block app_header %}{% include "restaurant/_manager_header.html" %}{% endblock %}
 
-<table class="mt-4 w-full text-left">
+{% block content %}
+<div class="flex items-center justify-between">
+    <h1 id="worker-account-list-marker" class="page-title">Worker accounts</h1>
+    <a href="{% url 'restaurant:worker_account_create' %}" class="btn-primary btn-sm">Create worker account</a>
+</div>
+
+<table class="data-table mt-6">
     <thead>
         <tr>
             <th>Username</th>
@@ -22,7 +24,7 @@
     <tbody>
         {% for worker in workers %}
         <tr>
-            <td>{{ worker.user.username }}</td>
+            <td class="font-medium text-stone-900">{{ worker.user.username }}</td>
             <td>
                 {% if worker.user.get_full_name %}
                     {{ worker.user.get_full_name }}
@@ -32,9 +34,15 @@
             </td>
             <td>{{ worker.user.email }}</td>
             <td>{{ worker.get_role_display }}</td>
-            <td>{% if worker.user.is_active %}Active{% else %}Inactive{% endif %}</td>
             <td>
-                <a href="{% url 'restaurant:worker_account_edit' worker.user.pk %}">Edit</a>
+                {% if worker.user.is_active %}
+                    <span class="badge badge-free">Active</span>
+                {% else %}
+                    <span class="badge badge-left">Inactive</span>
+                {% endif %}
+            </td>
+            <td>
+                <a href="{% url 'restaurant:worker_account_edit' worker.user.pk %}" class="link">Edit</a>
             </td>
         </tr>
         {% endfor %}

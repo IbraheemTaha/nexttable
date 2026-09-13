@@ -2,16 +2,24 @@
 
 {% block title %}NextTable - Manager{% endblock %}
 
+{% block app_header %}{% include "restaurant/_manager_header.html" %}{% endblock %}
+
 {% block content %}
-<h1 id="manager-landing-marker" class="text-2xl font-bold">Manager</h1>
-<p class="mt-2 text-gray-600">Authenticated manager placeholder.</p>
-<p class="mt-4">
-    <a href="{% url 'restaurant:worker_account_list' %}">Manage worker accounts</a>
-</p>
-<p class="mt-2">
-    <a href="{% url 'restaurant:table_config_list' %}">Manage tables</a>
-</p>
-<p class="mt-2">
-    <a href="{% url 'restaurant:eta_config' %}">Configure ETA rules</a>
-</p>
+<p class="eyebrow">Back of house</p>
+<h1 id="manager-landing-marker" class="page-title mt-1">Manager</h1>
+
+<div class="mt-6 grid gap-4 sm:grid-cols-3">
+    <a href="{% url 'restaurant:worker_account_list' %}" class="card block transition-shadow hover:shadow-md">
+        <p class="section-title">Worker accounts</p>
+        <p class="mt-1 text-sm text-stone-500">Add staff, set roles, deactivate access.</p>
+    </a>
+    <a href="{% url 'restaurant:table_config_list' %}" class="card block transition-shadow hover:shadow-md">
+        <p class="section-title">Tables</p>
+        <p class="mt-1 text-sm text-stone-500">Configure the floor plan and seating capacity.</p>
+    </a>
+    <a href="{% url 'restaurant:eta_config' %}" class="card block transition-shadow hover:shadow-md">
+        <p class="section-title">ETA rules</p>
+        <p class="mt-1 text-sm text-stone-500">Tune wait-time estimates by party size.</p>
+    </a>
+</div>
 {% endblock %}

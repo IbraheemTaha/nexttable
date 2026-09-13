@@ -3,23 +3,31 @@
 {% block title %}NextTable - Waitlist Status{% endblock %}
 
 {% block content %}
-<h1 id="guest-check-in-status-marker" class="text-2xl font-bold">You're on the waitlist</h1>
+<div class="mx-auto max-w-lg">
+    <p class="app-brand text-center">NextTable</p>
+    <div class="card mt-4">
+        <h1 id="guest-check-in-status-marker" class="page-title text-2xl">You're on the waitlist</h1>
 
-<dl class="mt-4" id="guest-waiting-summary">
-    <dt>Guest name</dt>
-    <dd>{{ entry.guest_name }}</dd>
+        <dl id="guest-waiting-summary" class="mt-4 grid grid-cols-2 gap-4 border-b border-stone-100 pb-4">
+            <div>
+                <dt class="field-hint">Guest name</dt>
+                <dd class="mt-0.5 font-medium text-stone-900">{{ entry.guest_name }}</dd>
+            </div>
+            <div>
+                <dt class="field-hint">Party size</dt>
+                <dd class="mt-0.5 font-medium text-stone-900">{{ entry.party_size }}</dd>
+            </div>
+        </dl>
 
-    <dt>Party size</dt>
-    <dd>{{ entry.party_size }}</dd>
-</dl>
-
-<section
-    id="guest-waiting-status"
-    class="mt-4"
-    hx-get="{{ status_partial_url }}"
-    hx-trigger="load, every 15s"
-    hx-swap="innerHTML"
->
-    {% include "restaurant/_guest_waiting_status.html" %}
-</section>
+        <section
+            id="guest-waiting-status"
+            class="mt-4"
+            hx-get="{{ status_partial_url }}"
+            hx-trigger="load, every 15s"
+            hx-swap="innerHTML"
+        >
+            {% include "restaurant/_guest_waiting_status.html" %}
+        </section>
+    </div>
+</div>
 {% endblock %}

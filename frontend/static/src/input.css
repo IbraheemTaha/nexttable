@@ -15,3 +15,185 @@
  *
  * See docs/setup/tailwind.md for how to download the CLI binary.
  */
+
+@layer base {
+  body {
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  h1, h2, h3 {
+    font-family: theme(fontFamily.display);
+    letter-spacing: -0.01em;
+  }
+
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+}
+
+@layer components {
+  /* Shell */
+  .app-header {
+    @apply sticky top-0 z-10 border-b border-stone-200 bg-stone-50/95 backdrop-blur;
+  }
+
+  .app-brand {
+    @apply font-display text-lg font-semibold tracking-tight text-ember-800;
+  }
+
+  .app-nav-link {
+    @apply rounded-md px-3 py-1.5 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-200/70 hover:text-stone-900;
+  }
+
+  .app-nav-link.is-active {
+    @apply bg-ember-600 text-white hover:bg-ember-600 hover:text-white;
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-transparent px-3.5 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 bg-ember-600 text-white hover:bg-ember-700 focus-visible:outline-ember-600;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-3.5 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 border-stone-300 bg-white text-stone-700 hover:bg-stone-50 focus-visible:outline-stone-400;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-transparent px-3.5 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-transparent px-3.5 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 bg-red-700 text-white hover:bg-red-800 focus-visible:outline-red-700;
+  }
+
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+
+  .link {
+    @apply font-medium text-ember-700 underline decoration-ember-300 underline-offset-2 hover:text-ember-800 hover:decoration-ember-500;
+  }
+
+  /* Surfaces */
+  .card {
+    @apply rounded-lg border border-stone-200 bg-white p-5 shadow-sm;
+  }
+
+  .page-title {
+    @apply font-display text-3xl font-semibold text-stone-900;
+  }
+
+  .section-title {
+    @apply font-display text-xl font-semibold text-stone-900;
+  }
+
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-wider text-ember-700;
+  }
+
+  /* Data tables */
+  .data-table {
+    @apply w-full border-separate border-spacing-0 overflow-hidden rounded-lg border border-stone-200 bg-white text-left text-sm shadow-sm;
+  }
+
+  .data-table thead th {
+    @apply border-b border-stone-200 bg-stone-100/80 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-stone-500;
+  }
+
+  .data-table tbody td {
+    @apply border-b border-stone-100 px-4 py-3 align-middle text-stone-700;
+  }
+
+  .data-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .data-table tbody tr:hover td {
+    @apply bg-stone-50;
+  }
+
+  .data-table tbody tr.is-empty td {
+    @apply py-8 text-center text-stone-400;
+  }
+
+  /* Status badges */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+
+  .badge-waiting { @apply bg-amber-100 text-amber-800; }
+  .badge-notified { @apply bg-sky-100 text-sky-800; }
+  .badge-arrived { @apply bg-violet-100 text-violet-800; }
+  .badge-seated { @apply bg-emerald-100 text-emerald-800; }
+  .badge-left { @apply bg-stone-100 text-stone-600; }
+  .badge-cancelled { @apply bg-stone-100 text-stone-500 line-through decoration-stone-400; }
+  .badge-no_show { @apply bg-red-100 text-red-700; }
+  .badge-late_demoted { @apply bg-orange-100 text-orange-800; }
+
+  .badge-free { @apply bg-emerald-100 text-emerald-800; }
+  .badge-occupied { @apply bg-ember-100 text-ember-800; }
+  .badge-cleaning { @apply bg-sky-100 text-sky-800; }
+  .badge-reserved { @apply bg-violet-100 text-violet-800; }
+
+  /* Forms */
+  .field-label {
+    @apply block text-sm font-medium text-stone-700;
+  }
+
+  .field-hint {
+    @apply text-xs font-medium text-stone-500;
+  }
+
+  .field-required {
+    @apply text-xs font-semibold uppercase tracking-wide text-ember-700;
+  }
+
+  .field-errors {
+    @apply mt-1 text-sm font-medium text-red-700;
+  }
+
+  form p {
+    @apply mb-3;
+  }
+
+  input[type="text"],
+  input[type="email"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="password"],
+  select,
+  textarea {
+    @apply mt-1 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm placeholder:text-stone-400 focus:border-ember-500 focus:outline-none focus:ring-2 focus:ring-ember-500/30;
+  }
+
+  /* Django messages */
+  .app-message {
+    @apply rounded-md border px-4 py-2.5 text-sm font-medium;
+  }
+
+  .app-message + .app-message {
+    @apply mt-2;
+  }
+
+  .app-message.success {
+    @apply border-emerald-200 bg-emerald-50 text-emerald-800;
+  }
+
+  .app-message.error {
+    @apply border-red-200 bg-red-50 text-red-800;
+  }
+
+  .app-message.warning {
+    @apply border-amber-200 bg-amber-50 text-amber-800;
+  }
+
+  .app-message.info,
+  .app-message.debug {
+    @apply border-sky-200 bg-sky-50 text-sky-800;
+  }
+
+  .empty-state {
+    @apply rounded-lg border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-center text-stone-500;
+  }
+}

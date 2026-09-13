@@ -1,10 +1,10 @@
 {% if eligible_entries and free_tables %}
-<section id="manual-table-assignment" class="mt-6">
-    <h2 class="text-lg font-semibold">Manually assign a table</h2>
-    <form method="post" action="{% url 'restaurant:manual_table_assignment' %}" class="mt-2 flex gap-2 items-end">
+<section id="manual-table-assignment" class="card mt-4">
+    <h2 class="section-title">Manually assign a table</h2>
+    <form method="post" action="{% url 'restaurant:manual_table_assignment' %}" class="mt-3 flex flex-wrap items-end gap-3">
         {% csrf_token %}
         <input type="hidden" name="next" value="waitlist">
-        <label>
+        <label class="field-label">
             Guest
             <select name="entry_id" id="manual-assign-entry">
                 {% for entry in eligible_entries %}
@@ -12,7 +12,7 @@
                 {% endfor %}
             </select>
         </label>
-        <label>
+        <label class="field-label">
             Table
             <select name="table_id" id="manual-assign-table">
                 {% for table in free_tables %}
@@ -20,19 +20,19 @@
                 {% endfor %}
             </select>
         </label>
-        <button type="submit" id="manual-assign-submit">Assign table</button>
+        <button type="submit" id="manual-assign-submit" class="btn-primary">Assign table</button>
     </form>
 </section>
 {% endif %}
 
-<table class="mt-4 w-full text-left">
+<table class="data-table mt-4">
     <thead>
         <tr>
             <th>Guest</th>
-            <th>Party size</th>
-            <th>Estimated wait (min)</th>
+            <th>Party</th>
+            <th>Est. wait</th>
             <th>Checked in</th>
-            <th>Preference notes</th>
+            <th>Notes</th>
             <th>Status</th>
             <th>Table</th>
             <th>Actions</th>
@@ -41,52 +41,54 @@
     <tbody>
         {% for entry in entries %}
         <tr id="waitlist-entry-{{ entry.pk }}">
-            <td>{{ entry.guest_name }}</td>
+            <td class="font-medium text-stone-900">{{ entry.guest_name }}</td>
             <td>{{ entry.party_size }}</td>
-            <td>{{ entry.estimated_wait_minutes }}</td>
+            <td>{{ entry.estimated_wait_minutes }} min</td>
             <td>{{ entry.checked_in_at }}</td>
-            <td>{{ entry.preference_notes }}</td>
-            <td>{{ entry.get_status_display }}</td>
+            <td class="max-w-[16rem] truncate text-stone-500">{{ entry.preference_notes }}</td>
+            <td><span class="badge badge-{{ entry.status }}">{{ entry.get_status_display }}</span></td>
             <td>
                 {% if entry.assigned_table %}
                     {{ entry.assigned_table.identifier }}
                 {% else %}
-                    &mdash;
+                    <span class="text-stone-400">&mdash;</span>
                 {% endif %}
             </td>
-            <td class="flex gap-2">
+            <td>
+                <div class="flex flex-wrap gap-1.5">
                 {% if entry.status == 'waiting' or entry.status == 'notified' or entry.status == 'late_demoted' %}
                 <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'arrived' %}">
                     {% csrf_token %}
-                    <button type="submit" id="waitlist-action-arrived-{{ entry.pk }}">Mark arrived</button>
+                    <button type="submit" id="waitlist-action-arrived-{{ entry.pk }}" class="btn-secondary btn-sm">Arrived</button>
                 </form>
                 {% endif %}
                 {% if entry.status == 'arrived' or entry.status == 'notified' %}
                 <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'seated' %}">
                     {% csrf_token %}
-                    <button type="submit" id="waitlist-action-seated-{{ entry.pk }}">Mark seated</button>
+                    <button type="submit" id="waitlist-action-seated-{{ entry.pk }}" class="btn-primary btn-sm">Seated</button>
                 </form>
                 {% endif %}
                 {% if entry.status == 'seated' %}
                 <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'left' %}">
                     {% csrf_token %}
-                    <button type="submit" id="waitlist-action-left-{{ entry.pk }}">Mark left</button>
+                    <button type="submit" id="waitlist-action-left-{{ entry.pk }}" class="btn-secondary btn-sm">Left</button>
                 </form>
                 {% endif %}
                 {% if entry.status == 'waiting' or entry.status == 'notified' or entry.status == 'arrived' or entry.status == 'late_demoted' %}
                 <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'cancelled' %}">
                     {% csrf_token %}
-                    <button type="submit" id="waitlist-action-cancelled-{{ entry.pk }}">Cancel</button>
+                    <button type="submit" id="waitlist-action-cancelled-{{ entry.pk }}" class="btn-ghost btn-sm">Cancel</button>
                 </form>
                 <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'no_show' %}">
                     {% csrf_token %}
-                    <button type="submit" id="waitlist-action-no-show-{{ entry.pk }}">No-show</button>
+                    <button type="submit" id="waitlist-action-no-show-{{ entry.pk }}" class="btn-danger btn-sm">No-show</button>
                 </form>
                 {% endif %}
+                </div>
             </td>
         </tr>
         {% empty %}
-        <tr>
+        <tr class="is-empty">
             <td colspan="8">No guests on the waitlist.</td>
         </tr>
         {% endfor %}

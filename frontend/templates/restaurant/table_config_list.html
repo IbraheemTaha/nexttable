@@ -2,22 +2,23 @@
 
 {% block title %}NextTable - Tables{% endblock %}
 
+{% block app_header %}{% include "restaurant/_manager_header.html" %}{% endblock %}
+
 {% block content %}
-<h1 id="table-config-list-marker" class="text-2xl font-bold">Tables</h1>
+<div class="flex items-center justify-between">
+    <h1 id="table-config-list-marker" class="page-title">Tables</h1>
+    <a href="{% url 'restaurant:table_config_create' %}" class="btn-primary btn-sm">Create table</a>
+</div>
 
 {% if messages %}
-    <ul class="mt-4">
+    <ul class="mt-4 space-y-2">
         {% for message in messages %}
-            <li>{{ message }}</li>
+            <li class="app-message {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</li>
         {% endfor %}
     </ul>
 {% endif %}
 
-<p class="mt-4">
-    <a href="{% url 'restaurant:table_config_create' %}">Create table</a>
-</p>
-
-<table class="mt-4 w-full text-left">
+<table class="data-table mt-6">
     <thead>
         <tr>
             <th>Identifier</th>
@@ -29,16 +30,16 @@
     <tbody>
         {% for table in tables %}
         <tr>
-            <td>{{ table.identifier }}</td>
+            <td class="font-medium text-stone-900">{{ table.identifier }}</td>
             <td>{{ table.capacity }}</td>
-            <td>{{ table.get_status_display }}</td>
-            <td>
-                <a href="{% url 'restaurant:table_config_edit' table.pk %}">Edit</a>
-                <a href="{% url 'restaurant:table_config_remove' table.pk %}">Remove</a>
+            <td><span class="badge badge-{{ table.status }}">{{ table.get_status_display }}</span></td>
+            <td class="space-x-3">
+                <a href="{% url 'restaurant:table_config_edit' table.pk %}" class="link">Edit</a>
+                <a href="{% url 'restaurant:table_config_remove' table.pk %}" class="link">Remove</a>
             </td>
         </tr>
         {% empty %}
-        <tr>
+        <tr class="is-empty">
             <td colspan="4">No tables configured.</td>
         </tr>
         {% endfor %}

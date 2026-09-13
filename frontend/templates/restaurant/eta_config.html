@@ -2,28 +2,30 @@
 
 {% block title %}NextTable - ETA Configuration{% endblock %}
 
-{% block content %}
-<h1 id="eta-config-marker" class="text-2xl font-bold">ETA Configuration</h1>
+{% block app_header %}{% include "restaurant/_manager_header.html" %}{% endblock %}
 
-<section class="mt-4">
-    <h2 class="text-xl font-semibold">Grace period</h2>
-    <p>Notified guest grace period: {{ settings.grace_period_minutes }} minutes</p>
-    <p>
-        <a href="{% url 'restaurant:eta_grace_period_edit' %}">Edit grace period</a>
+{% block content %}
+<h1 id="eta-config-marker" class="page-title">ETA configuration</h1>
+
+<section class="card mt-6">
+    <h2 class="section-title">Grace period</h2>
+    <p class="mt-2 text-stone-600">Notified guest grace period: <strong>{{ settings.grace_period_minutes }} minutes</strong></p>
+    <p class="mt-3">
+        <a href="{% url 'restaurant:eta_grace_period_edit' %}" class="link">Edit grace period</a>
     </p>
 </section>
 
 <section class="mt-6">
-    <h2 class="text-xl font-semibold">Party-size ETA rules</h2>
-    <p class="mt-2">
-        <a href="{% url 'restaurant:eta_rule_create' %}">Create ETA rule</a>
-    </p>
+    <div class="flex items-center justify-between">
+        <h2 class="section-title">Party-size ETA rules</h2>
+        <a href="{% url 'restaurant:eta_rule_create' %}" class="btn-primary btn-sm">Create ETA rule</a>
+    </div>
 
-    <table class="mt-4 w-full text-left">
+    <table class="data-table mt-4">
         <thead>
             <tr>
-                <th>Minimum party size</th>
-                <th>Maximum party size</th>
+                <th>Min party</th>
+                <th>Max party</th>
                 <th>Estimated wait</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -37,23 +39,23 @@
                     {% if rule.max_party_size %}
                         {{ rule.max_party_size }}
                     {% else %}
-                        Open-ended
+                        <span class="text-stone-400">Open-ended</span>
                     {% endif %}
                 </td>
                 <td>{{ rule.estimated_wait_minutes }} minutes</td>
                 <td>
                     {% if rule.is_active %}
-                        Active
+                        <span class="badge badge-free">Active</span>
                     {% else %}
-                        Inactive
+                        <span class="badge badge-left">Inactive</span>
                     {% endif %}
                 </td>
                 <td>
-                    <a href="{% url 'restaurant:eta_rule_edit' rule.pk %}">Edit</a>
+                    <a href="{% url 'restaurant:eta_rule_edit' rule.pk %}" class="link">Edit</a>
                 </td>
             </tr>
             {% empty %}
-            <tr>
+            <tr class="is-empty">
                 <td colspan="5">No ETA rules configured.</td>
             </tr>
             {% endfor %}

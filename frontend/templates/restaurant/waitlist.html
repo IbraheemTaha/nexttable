@@ -2,37 +2,40 @@
 
 {% block title %}NextTable - Waitlist{% endblock %}
 
+{% block app_header %}{% include "restaurant/_staff_header.html" %}{% endblock %}
+
 {% block content %}
-<h1 id="waitlist-marker" class="text-2xl font-bold">Waitlist</h1>
+<div class="flex items-center justify-between">
+    <h1 id="waitlist-marker" class="page-title">Waitlist</h1>
+    <nav id="waitlist-filters" class="flex gap-1 rounded-lg border border-stone-200 bg-white p-1">
+        <a
+            id="waitlist-filter-all"
+            href="{% url 'restaurant:waitlist' %}"
+            class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors {% if status_filter == 'all' %}bg-ember-600 text-white{% else %}text-stone-600 hover:bg-stone-100{% endif %}"
+        >
+            All active
+        </a>
+        <a
+            id="waitlist-filter-waiting"
+            href="{% url 'restaurant:waitlist' %}?status=waiting"
+            class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors {% if status_filter == 'waiting' %}bg-ember-600 text-white{% else %}text-stone-600 hover:bg-stone-100{% endif %}"
+        >
+            Waiting only
+        </a>
+    </nav>
+</div>
 
 {% if messages %}
-<ul id="waitlist-messages" class="mt-4">
+<ul id="waitlist-messages" class="mt-4 space-y-2">
     {% for message in messages %}
-    <li class="{% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</li>
+    <li class="app-message {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</li>
     {% endfor %}
 </ul>
 {% endif %}
 
-<nav id="waitlist-filters" class="mt-4 flex gap-4">
-    <a
-        id="waitlist-filter-all"
-        href="{% url 'restaurant:waitlist' %}"
-        class="{% if status_filter == 'all' %}font-bold underline{% else %}text-blue-600 hover:underline{% endif %}"
-    >
-        All active
-    </a>
-    <a
-        id="waitlist-filter-waiting"
-        href="{% url 'restaurant:waitlist' %}?status=waiting"
-        class="{% if status_filter == 'waiting' %}font-bold underline{% else %}text-blue-600 hover:underline{% endif %}"
-    >
-        Waiting only
-    </a>
-</nav>
-
 <div
     id="waitlist-content"
-    class="mt-4"
+    class="mt-6"
     hx-get="{% url 'restaurant:waitlist_partial' %}{% if status_filter == 'waiting' %}?status=waiting{% endif %}"
     hx-trigger="load, every 15s"
     hx-swap="innerHTML"
@@ -40,7 +43,7 @@
     {% include "restaurant/_waitlist_content.html" %}
 </div>
 
-<p class="mt-4">
-    <a href="{% url 'restaurant:staff_landing' %}" class="text-blue-600 hover:underline">Back to dashboard</a>
+<p class="mt-6">
+    <a href="{% url 'restaurant:staff_landing' %}" class="link">&larr; Back to dashboard</a>
 </p>
 {% endblock %}
