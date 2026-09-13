@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - Table Status{% endblock %}
+
+{% block content %}
+<h1 id="table-status-marker" class="text-2xl font-bold">Table Status</h1>
+
+{% for group in status_groups %}
+<section id="table-status-group-{{ group.status }}" class="mt-6">
+    <h2 class="text-lg font-semibold">{{ group.label }} ({{ group.tables|length }})</h2>
+    {% if group.tables %}
+    <table class="mt-2 w-full text-left">
+        <thead>
+            <tr>
+                <th>Table</th>
+                <th>Capacity</th>
+                <th>Guest</th>
+                <th>Party size</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for table in group.tables %}
+            <tr id="table-status-row-{{ table.pk }}">
+                <td>{{ table.identifier }}</td>
+                <td>{{ table.capacity }}</td>
+                {% if table.current_guest_entry %}
+                <td id="table-status-guest-{{ table.pk }}">{{ table.current_guest_entry.guest_name }}</td>
+                <td id="table-status-party-size-{{ table.pk }}">{{ table.current_guest_entry.party_size }}</td>
+                {% else %}
+                <td>&mdash;</td>
+                <td>&mdash;</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="mt-2 text-gray-600">No tables with this status.</p>
+    {% endif %}
+</section>
+{% endfor %}
+
+<p class="mt-6">
+    <a href="{% url 'restaurant:staff_landing' %}" class="text-blue-600 hover:underline">Back to dashboard</a>
+</p>
+{% endblock %}

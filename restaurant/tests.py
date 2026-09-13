@@ -3140,6 +3140,144 @@ class StaffWaitlistViewTests(TestCase):
         self.assertContains(response, reverse('restaurant:staff_landing'))
 
 
+class StaffTableStatusViewTests(TestCase):
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.staff_user = user_model.objects.create_user(
+            username='table-status-staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+        cls.manager_user = user_model.objects.create_user(
+            username='table-status-manager',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.manager_user,
+            role=WorkerProfile.Role.MANAGER,
+        )
+        cls.no_role_user = user_model.objects.create_user(
+            username='table-status-plain',
+            password=cls.password,
+        )
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_staff_or_manager_required_denies_no_role_user(self):
+        self.client.force_login(self.no_role_user)
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_user_can_view_page(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="table-status-marker"')
+
+    def test_manager_user_can_view_page(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_free_table_shown_with_no_guest_info(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='F1',
+            capacity=2,
+            status=RestaurantTable.Status.FREE,
+        )
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertContains(response, table.identifier)
+        self.assertNotContains(response, f'table-status-guest-{table.pk}')
+
+    def test_occupied_table_shown_with_assigned_guest(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='O1',
+            capacity=4,
+            status=RestaurantTable.Status.OCCUPIED,
+        )
+        WaitlistEntry.objects.create(
+            guest_name='Occupied Guest',
+            party_size=3,
+            status=WaitlistEntry.Status.SEATED,
+            assigned_table=table,
+        )
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertContains(response, table.identifier)
+        self.assertContains(response, 'Occupied Guest')
+        self.assertContains(response, f'id="table-status-party-size-{table.pk}">3<')
+
+    def test_reserved_table_shown_with_assigned_guest(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='R1',
+            capacity=2,
+            status=RestaurantTable.Status.RESERVED,
+        )
+        WaitlistEntry.objects.create(
+            guest_name='Reserved Guest',
+            party_size=2,
+            status=WaitlistEntry.Status.NOTIFIED,
+            assigned_table=table,
+        )
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertContains(response, table.identifier)
+        self.assertContains(response, 'Reserved Guest')
+
+    def test_tables_grouped_by_status(self):
+        self.client.force_login(self.staff_user)
+        free_table = RestaurantTable.objects.create(
+            identifier='G-FREE',
+            capacity=2,
+            status=RestaurantTable.Status.FREE,
+        )
+        cleaning_table = RestaurantTable.objects.create(
+            identifier='G-CLEAN',
+            capacity=2,
+            status=RestaurantTable.Status.CLEANING,
+        )
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertContains(response, 'id="table-status-group-free"')
+        self.assertContains(response, 'id="table-status-group-cleaning"')
+        status_groups = {
+            group['status']: group for group in response.context['status_groups']
+        }
+        self.assertIn(free_table, status_groups['free']['tables'])
+        self.assertIn(cleaning_table, status_groups['cleaning']['tables'])
+
+    def test_page_links_back_to_staff_dashboard(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertContains(response, reverse('restaurant:staff_landing'))
+
+
 class GuestStatusTransitionServiceTests(TestCase):
     """Tests for the guest status transition service functions."""
 

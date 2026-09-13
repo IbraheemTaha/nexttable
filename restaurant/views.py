@@ -110,9 +110,43 @@ def waitlist_entry_action(request, entry_id, action):
     return redirect('restaurant:waitlist')
 
 
+TABLE_GUEST_WAITLIST_STATUSES = [
+    WaitlistEntry.Status.NOTIFIED,
+    WaitlistEntry.Status.ARRIVED,
+    WaitlistEntry.Status.SEATED,
+]
+
+
 @staff_or_manager_required
 def table_status(request):
-    return render(request, 'restaurant/table_status_placeholder.html')
+    guest_entries_by_table_id = {
+        entry.assigned_table_id: entry
+        for entry in WaitlistEntry.objects.filter(
+            status__in=TABLE_GUEST_WAITLIST_STATUSES,
+            assigned_table__isnull=False,
+        )
+    }
+
+    tables = RestaurantTable.objects.order_by('identifier')
+    tables_by_status = {status: [] for status, _ in RestaurantTable.Status.choices}
+    for table in tables:
+        table.current_guest_entry = guest_entries_by_table_id.get(table.id)
+        tables_by_status.setdefault(table.status, []).append(table)
+
+    status_groups = [
+        {
+            'status': status,
+            'label': label,
+            'tables': tables_by_status.get(status, []),
+        }
+        for status, label in RestaurantTable.Status.choices
+    ]
+
+    return render(
+        request,
+        'restaurant/table_status.html',
+        {'status_groups': status_groups},
+    )
 
 
 @manager_required
