@@ -490,3 +490,260 @@ class WorkerAccountManagementTests(TestCase):
             self.manager_user.worker_profile.role,
             WorkerProfile.Role.MANAGER,
         )
+
+
+class TableConfigurationTests(TestCase):
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.manager_user = user_model.objects.create_user(
+            username='manager',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.manager_user,
+            role=WorkerProfile.Role.MANAGER,
+        )
+        cls.staff_user = user_model.objects.create_user(
+            username='staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+        cls.table = RestaurantTable.objects.create(
+            identifier='Window 1',
+            capacity=4,
+            status=RestaurantTable.Status.FREE,
+        )
+
+    def test_manager_can_view_table_config_list(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(reverse('restaurant:table_config_list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="table-config-list-marker"')
+        self.assertContains(response, 'Window 1')
+        self.assertContains(response, '4')
+        self.assertContains(response, 'Free')
+        self.assertContains(response, reverse('restaurant:table_config_create'))
+        self.assertContains(
+            response,
+            reverse('restaurant:table_config_edit', args=[self.table.pk]),
+        )
+        self.assertContains(
+            response,
+            reverse('restaurant:table_config_remove', args=[self.table.pk]),
+        )
+
+    def test_manager_landing_links_to_table_config_list(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(reverse('restaurant:manager_landing'))
+
+        self.assertContains(response, reverse('restaurant:table_config_list'))
+
+    def test_staff_user_is_denied_table_config_pages(self):
+        self.client.force_login(self.staff_user)
+
+        urls = [
+            reverse('restaurant:table_config_list'),
+            reverse('restaurant:table_config_create'),
+            reverse('restaurant:table_config_edit', args=[self.table.pk]),
+            reverse('restaurant:table_config_remove', args=[self.table.pk]),
+        ]
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 403)
+
+                post_response = self.client.post(url, {})
+                self.assertEqual(post_response.status_code, 403)
+
+    def test_anonymous_user_is_redirected_from_table_config_pages(self):
+        urls = [
+            reverse('restaurant:table_config_list'),
+            reverse('restaurant:table_config_create'),
+            reverse('restaurant:table_config_edit', args=[self.table.pk]),
+            reverse('restaurant:table_config_remove', args=[self.table.pk]),
+        ]
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 302)
+                self.assertIn(reverse('login'), response['Location'])
+                self.assertIn(f'next={url}', response['Location'])
+
+    def test_manager_can_create_table(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:table_config_create'),
+            {
+                'identifier': 'Patio 2',
+                'capacity': '6',
+                'status': RestaurantTable.Status.RESERVED,
+            },
+        )
+
+        self.assertRedirects(response, reverse('restaurant:table_config_list'))
+        table = RestaurantTable.objects.get(identifier='Patio 2')
+        self.assertEqual(table.capacity, 6)
+        self.assertEqual(table.status, RestaurantTable.Status.RESERVED)
+
+    def test_create_table_rejects_invalid_values_and_preserves_safe_values(self):
+        self.client.force_login(self.manager_user)
+        RestaurantTable.objects.create(
+            identifier='Duplicate',
+            capacity=2,
+            status=RestaurantTable.Status.FREE,
+        )
+
+        cases = [
+            (
+                {
+                    'identifier': '',
+                    'capacity': '4',
+                    'status': RestaurantTable.Status.FREE,
+                },
+                'This field is required.',
+            ),
+            (
+                {
+                    'identifier': 'Duplicate',
+                    'capacity': '4',
+                    'status': RestaurantTable.Status.FREE,
+                },
+                'Restaurant table with this Identifier already exists.',
+            ),
+            (
+                {
+                    'identifier': 'Zero',
+                    'capacity': '0',
+                    'status': RestaurantTable.Status.FREE,
+                },
+                'Capacity must be greater than zero.',
+            ),
+            (
+                {
+                    'identifier': 'Words',
+                    'capacity': 'many',
+                    'status': RestaurantTable.Status.FREE,
+                },
+                'Enter a whole number.',
+            ),
+            (
+                {
+                    'identifier': 'Invalid Status',
+                    'capacity': '4',
+                    'status': 'maintenance',
+                },
+                'Select a valid choice',
+            ),
+        ]
+
+        for data, error in cases:
+            with self.subTest(data=data):
+                response = self.client.post(
+                    reverse('restaurant:table_config_create'),
+                    data,
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, error)
+                if data['identifier']:
+                    self.assertContains(response, data['identifier'])
+
+        self.assertFalse(RestaurantTable.objects.filter(identifier='Zero').exists())
+        self.assertFalse(RestaurantTable.objects.filter(identifier='Words').exists())
+        self.assertFalse(
+            RestaurantTable.objects.filter(identifier='Invalid Status').exists()
+        )
+
+    def test_manager_can_edit_table_without_creating_duplicate(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:table_config_edit', args=[self.table.pk]),
+            {
+                'identifier': 'Window 2',
+                'capacity': '8',
+                'status': RestaurantTable.Status.CLEANING,
+            },
+        )
+
+        self.assertRedirects(response, reverse('restaurant:table_config_list'))
+        self.table.refresh_from_db()
+        self.assertEqual(self.table.identifier, 'Window 2')
+        self.assertEqual(self.table.capacity, 8)
+        self.assertEqual(self.table.status, RestaurantTable.Status.CLEANING)
+        self.assertEqual(RestaurantTable.objects.count(), 1)
+
+    def test_edit_table_rejects_invalid_status(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:table_config_edit', args=[self.table.pk]),
+            {
+                'identifier': 'Window 1',
+                'capacity': '4',
+                'status': 'maintenance',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Select a valid choice')
+        self.table.refresh_from_db()
+        self.assertEqual(self.table.status, RestaurantTable.Status.FREE)
+
+    def test_remove_table_requires_confirmation_post(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(
+            reverse('restaurant:table_config_remove', args=[self.table.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="table-config-remove-marker"')
+        self.assertTrue(RestaurantTable.objects.filter(pk=self.table.pk).exists())
+
+    def test_manager_can_remove_allowed_table_with_post(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.post(
+            reverse('restaurant:table_config_remove', args=[self.table.pk])
+        )
+
+        self.assertRedirects(response, reverse('restaurant:table_config_list'))
+        self.assertFalse(RestaurantTable.objects.filter(pk=self.table.pk).exists())
+
+    def test_manager_cannot_remove_reserved_or_occupied_tables(self):
+        self.client.force_login(self.manager_user)
+
+        for status in [
+            RestaurantTable.Status.RESERVED,
+            RestaurantTable.Status.OCCUPIED,
+        ]:
+            with self.subTest(status=status):
+                table = RestaurantTable.objects.create(
+                    identifier=f'Blocked {status}',
+                    capacity=2,
+                    status=status,
+                )
+
+                response = self.client.post(
+                    reverse('restaurant:table_config_remove', args=[table.pk]),
+                    follow=True,
+                )
+
+                self.assertRedirects(response, reverse('restaurant:table_config_list'))
+                self.assertContains(
+                    response,
+                    'Reserved or occupied tables cannot be removed.',
+                )
+                self.assertContains(response, table.identifier)
+                self.assertTrue(RestaurantTable.objects.filter(pk=table.pk).exists())

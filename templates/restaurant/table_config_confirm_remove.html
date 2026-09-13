@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - Remove Table{% endblock %}
+
+{% block content %}
+<h1 id="table-config-remove-marker" class="text-2xl font-bold">Remove Table</h1>
+<p class="mt-4">Remove {{ table.identifier }}?</p>
+<p>Capacity: {{ table.capacity }}</p>
+<p>Status: {{ table.get_status_display }}</p>
+
+<form method="post" class="mt-4">
+    {% csrf_token %}
+    <button type="submit">Remove table</button>
+    <a href="{% url 'restaurant:table_config_list' %}">Cancel</a>
+</form>
+{% endblock %}

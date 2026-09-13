@@ -22,4 +22,24 @@ urlpatterns = [
         views.worker_account_edit,
         name='worker_account_edit',
     ),
+    path(
+        'manager/tables/',
+        views.table_config_list,
+        name='table_config_list',
+    ),
+    path(
+        'manager/tables/new/',
+        views.table_config_create,
+        name='table_config_create',
+    ),
+    path(
+        'manager/tables/<int:table_id>/edit/',
+        views.table_config_edit,
+        name='table_config_edit',
+    ),
+    path(
+        'manager/tables/<int:table_id>/remove/',
+        views.table_config_remove,
+        name='table_config_remove',
+    ),
 ]

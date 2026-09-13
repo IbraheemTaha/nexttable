@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 
-from .models import WorkerProfile
+from .models import RestaurantTable, WorkerProfile
 
 
 ROLE_CHOICES = (
@@ -124,3 +124,15 @@ class WorkerAccountEditForm(forms.Form):
         profile.role = self.cleaned_data['role']
         profile.save()
         return self.user
+
+
+class RestaurantTableForm(forms.ModelForm):
+    class Meta:
+        model = RestaurantTable
+        fields = ['identifier', 'capacity', 'status']
+
+    def clean_capacity(self):
+        capacity = self.cleaned_data['capacity']
+        if capacity <= 0:
+            raise forms.ValidationError('Capacity must be greater than zero.')
+        return capacity

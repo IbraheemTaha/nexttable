@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - Tables{% endblock %}
+
+{% block content %}
+<h1 id="table-config-list-marker" class="text-2xl font-bold">Tables</h1>
+
+{% if messages %}
+    <ul class="mt-4">
+        {% for message in messages %}
+            <li>{{ message }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+
+<p class="mt-4">
+    <a href="{% url 'restaurant:table_config_create' %}">Create table</a>
+</p>
+
+<table class="mt-4 w-full text-left">
+    <thead>
+        <tr>
+            <th>Identifier</th>
+            <th>Capacity</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for table in tables %}
+        <tr>
+            <td>{{ table.identifier }}</td>
+            <td>{{ table.capacity }}</td>
+            <td>{{ table.get_status_display }}</td>
+            <td>
+                <a href="{% url 'restaurant:table_config_edit' table.pk %}">Edit</a>
+                <a href="{% url 'restaurant:table_config_remove' table.pk %}">Remove</a>
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="4">No tables configured.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
