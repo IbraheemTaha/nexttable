@@ -31,6 +31,8 @@ urlpatterns = [
         name='guest_check_in_cancel',
     ),
     path('staff/', views.staff_landing, name='staff_landing'),
+    path('staff/waitlist/', views.waitlist, name='waitlist'),
+    path('staff/tables/', views.table_status, name='table_status'),
     path('manager/', views.manager_landing, name='manager_landing'),
     path(
         'manager/workers/',

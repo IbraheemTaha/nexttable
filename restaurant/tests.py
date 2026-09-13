@@ -1027,6 +1027,77 @@ class WorkerAuthorizationTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_staff_landing_displays_logged_in_user_and_logout_action(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:staff_landing'))
+
+        self.assertContains(response, self.staff_user.get_username())
+        self.assertContains(response, reverse('logout'))
+
+    def test_staff_landing_renders_navigation_to_waitlist_and_table_status(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:staff_landing'))
+
+        self.assertContains(response, 'id="staff-dashboard-nav"')
+        self.assertContains(response, reverse('restaurant:waitlist'))
+        self.assertContains(response, reverse('restaurant:table_status'))
+
+    def test_anonymous_user_is_redirected_from_waitlist_to_login(self):
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_staff_user_can_view_waitlist_placeholder(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_manager_user_can_view_waitlist_placeholder(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_no_role_user_is_denied_waitlist_placeholder(self):
+        self.client.force_login(self.no_role_user)
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_user_is_redirected_from_table_status_to_login(self):
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_staff_user_can_view_table_status_placeholder(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_manager_user_can_view_table_status_placeholder(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_no_role_user_is_denied_table_status_placeholder(self):
+        self.client.force_login(self.no_role_user)
+
+        response = self.client.get(reverse('restaurant:table_status'))
+
+        self.assertEqual(response.status_code, 403)
+
     def test_anonymous_user_is_redirected_from_manager_landing_to_login(self):
         response = self.client.get(reverse('restaurant:manager_landing'))
 

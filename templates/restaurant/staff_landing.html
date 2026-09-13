@@ -3,6 +3,37 @@
 {% block title %}NextTable - Staff{% endblock %}
 
 {% block content %}
-<h1 id="staff-landing-marker" class="text-2xl font-bold">Staff</h1>
-<p class="mt-2 text-gray-600">Authenticated staff placeholder.</p>
+<div id="staff-landing-marker" class="flex items-center justify-between border-b border-gray-200 pb-4">
+    <h1 class="text-2xl font-bold">Staff Dashboard</h1>
+    <div class="flex items-center gap-4">
+        <span id="current-user-display" class="text-sm text-gray-600">
+            Signed in as <strong>{{ user.get_username }}</strong>
+        </span>
+        <form method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button type="submit" class="text-sm text-blue-600 hover:underline">Logout</button>
+        </form>
+    </div>
+</div>
+
+<nav id="staff-dashboard-nav" class="mt-6">
+    <ul class="flex flex-col gap-2">
+        <li>
+            <a id="nav-waitlist" href="{% url 'restaurant:waitlist' %}" class="text-blue-600 hover:underline">
+                Waitlist
+            </a>
+        </li>
+        <li>
+            <a id="nav-table-status" href="{% url 'restaurant:table_status' %}" class="text-blue-600 hover:underline">
+                Table Status
+            </a>
+        </li>
+    </ul>
+</nav>
+
+<div class="mt-6">
+    {% block dashboard_content %}
+    <p class="text-gray-600">Select an option above to get started.</p>
+    {% endblock %}
+</div>
 {% endblock %}

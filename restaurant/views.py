@@ -28,6 +28,16 @@ def staff_landing(request):
     return render(request, 'restaurant/staff_landing.html')
 
 
+@staff_or_manager_required
+def waitlist(request):
+    return render(request, 'restaurant/waitlist_placeholder.html')
+
+
+@staff_or_manager_required
+def table_status(request):
+    return render(request, 'restaurant/table_status_placeholder.html')
+
+
 @manager_required
 def manager_landing(request):
     return render(request, 'restaurant/manager_landing.html')
