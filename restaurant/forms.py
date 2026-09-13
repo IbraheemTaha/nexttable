@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 
-from .models import RestaurantTable, WorkerProfile
+from .models import RestaurantTable, WaitlistEntry, WorkerProfile
 
 
 LOCATION_PREFERENCE_CHOICES = (
@@ -193,3 +193,24 @@ class GuestCheckInForm(forms.Form):
         required=False,
         widget=forms.Textarea(attrs={'rows': 3}),
     )
+
+    def save(self):
+        preference_parts = []
+        for field_name in [
+            'location_preference',
+            'seating_preference',
+            'accessibility_requirements',
+            'high_chair_needed',
+            'notes',
+        ]:
+            value = self.cleaned_data.get(field_name)
+            if value:
+                label = self.fields[field_name].label
+                preference_parts.append(f'{label}: {value}')
+
+        return WaitlistEntry.objects.create(
+            guest_name=self.cleaned_data['guest_name'],
+            party_size=self.cleaned_data['party_size'],
+            contact_text=self.cleaned_data.get('phone_number', ''),
+            preference_notes='\n'.join(preference_parts),
+        )

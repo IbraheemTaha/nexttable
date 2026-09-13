@@ -207,7 +207,7 @@ class GuestCheckInPageTests(TestCase):
         self.assertNotContains(response, 'name="guest_name"')
         self.assertNotContains(response, reverse('login'))
 
-    def test_post_does_not_create_waitlist_entry_before_submission_issue(self):
+    def test_successful_submission_creates_waitlist_entry_and_redirects(self):
         token = get_current_check_in_token()
 
         response = self.client.post(
@@ -224,9 +224,115 @@ class GuestCheckInPageTests(TestCase):
             },
         )
 
+        entry = WaitlistEntry.objects.get()
+        self.assertRedirects(
+            response,
+            reverse(
+                'restaurant:guest_check_in_status',
+                args=[entry.public_identifier],
+            ),
+        )
+        self.assertEqual(entry.guest_name, 'Ada Lovelace')
+        self.assertEqual(entry.party_size, 2)
+        self.assertEqual(entry.contact_text, '555-0101')
+        self.assertIn('Indoor/outdoor preference: indoor', entry.preference_notes)
+        self.assertIn('Seating preference: booth', entry.preference_notes)
+        self.assertIn('Notes: Near a window if possible', entry.preference_notes)
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+        self.assertEqual(entry.estimated_wait_minutes, 15)
+        self.assertIsNotNone(entry.public_identifier)
+
+    def test_status_page_shows_static_waitlist_information_without_duplicate(self):
+        entry = WaitlistEntry.objects.create(
+            guest_name='Grace Hopper',
+            party_size=4,
+        )
+        status_url = reverse(
+            'restaurant:guest_check_in_status',
+            args=[entry.public_identifier],
+        )
+
+        response = self.client.get(status_url)
+        second_response = self.client.get(status_url)
+
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'id="guest-check-in-unavailable-marker"')
+        self.assertEqual(second_response.status_code, 200)
+        self.assertContains(response, 'id="guest-check-in-status-marker"')
+        self.assertContains(response, 'Grace Hopper')
+        self.assertContains(response, '4')
+        self.assertContains(response, 'Waiting')
+        self.assertContains(response, '15 minutes')
+        self.assertEqual(WaitlistEntry.objects.count(), 1)
+
+    def test_invalid_and_expired_token_submissions_do_not_create_entries(self):
+        previous_day = timezone.localdate() - timezone.timedelta(days=1)
+        old_token = get_current_check_in_token(for_date=previous_day)
+
+        for token, marker in [
+            ('not-a-real-token', 'id="guest-check-in-invalid-marker"'),
+            (old_token, 'id="guest-check-in-expired-marker"'),
+        ]:
+            with self.subTest(token=token):
+                response = self.client.post(
+                    reverse('restaurant:guest_check_in_submit', args=[token]),
+                    {'guest_name': 'Ada Lovelace', 'party_size': '2'},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, marker)
+                self.assertEqual(WaitlistEntry.objects.count(), 0)
+
+    def test_invalid_submission_rerenders_form_with_errors_and_safe_values(self):
+        token = get_current_check_in_token()
+
+        response = self.client.post(
+            reverse('restaurant:guest_check_in_submit', args=[token]),
+            {
+                'guest_name': '',
+                'party_size': '0',
+                'phone_number': '555-0101',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'This field is required.')
+        self.assertContains(response, 'Ensure this value is greater than or equal to 1.')
+        self.assertContains(response, '555-0101')
         self.assertEqual(WaitlistEntry.objects.count(), 0)
+
+    def test_submission_ignores_client_submitted_internal_fields(self):
+        token = get_current_check_in_token()
+        submitted_public_identifier = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+
+        response = self.client.post(
+            reverse('restaurant:guest_check_in_submit', args=[token]),
+            {
+                'guest_name': 'Katherine Johnson',
+                'party_size': '3',
+                'phone_number': '555-0202',
+                'status': WaitlistEntry.Status.SEATED,
+                'estimated_wait_minutes': '1',
+                'public_identifier': submitted_public_identifier,
+                'priority_metadata': '{"score": 999}',
+                'assigned_table': '1',
+                'notified_at': '2026-09-13T12:00:00Z',
+            },
+        )
+
+        entry = WaitlistEntry.objects.get()
+        self.assertRedirects(
+            response,
+            reverse(
+                'restaurant:guest_check_in_status',
+                args=[entry.public_identifier],
+            ),
+        )
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+        self.assertEqual(entry.estimated_wait_minutes, 15)
+        self.assertNotEqual(str(entry.public_identifier), submitted_public_identifier)
+        self.assertEqual(entry.priority_metadata, {})
+        self.assertIsNone(entry.assigned_table)
+        self.assertIsNone(entry.notified_at)
 
 
 class RestaurantSettingsGetActiveTests(TestCase):

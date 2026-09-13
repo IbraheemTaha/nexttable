@@ -11,7 +11,7 @@ from .forms import (
     WorkerAccountCreateForm,
     WorkerAccountEditForm,
 )
-from .models import RestaurantTable, WorkerProfile
+from .models import RestaurantTable, WaitlistEntry, WorkerProfile
 
 
 @staff_or_manager_required
@@ -46,10 +46,41 @@ def guest_check_in(request, token):
 
 def guest_check_in_submit(request, token):
     token_state = _check_in_token_state(token)
+    if token_state != 'valid':
+        return render(
+            request,
+            'restaurant/guest_check_in.html',
+            {'token_state': token_state},
+        )
+
+    form = GuestCheckInForm(request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        entry = form.save()
+        return redirect(
+            'restaurant:guest_check_in_status',
+            public_identifier=entry.public_identifier,
+        )
+
     return render(
         request,
         'restaurant/guest_check_in.html',
-        {'token_state': token_state, 'submission_unavailable': True},
+        {
+            'form': form,
+            'token': token,
+            'token_state': token_state,
+        },
+    )
+
+
+def guest_check_in_status(request, public_identifier):
+    entry = get_object_or_404(
+        WaitlistEntry,
+        public_identifier=public_identifier,
+    )
+    return render(
+        request,
+        'restaurant/guest_check_in_status.html',
+        {'entry': entry},
     )
 
 

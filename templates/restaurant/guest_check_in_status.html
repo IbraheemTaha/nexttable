@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - Waitlist Status{% endblock %}
+
+{% block content %}
+<h1 id="guest-check-in-status-marker" class="text-2xl font-bold">You're on the waitlist</h1>
+
+<dl class="mt-4">
+    <dt>Guest name</dt>
+    <dd>{{ entry.guest_name }}</dd>
+
+    <dt>Party size</dt>
+    <dd>{{ entry.party_size }}</dd>
+
+    <dt>Status</dt>
+    <dd>{{ entry.get_status_display }}</dd>
+
+    <dt>Estimated wait</dt>
+    <dd>{{ entry.estimated_wait_minutes }} minutes</dd>
+</dl>
+{% endblock %}

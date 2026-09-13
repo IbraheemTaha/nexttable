@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -139,6 +141,8 @@ class RestaurantTable(models.Model):
 class WaitlistEntry(models.Model):
     """Guest waitlist record for the core check-in lifecycle."""
 
+    DEFAULT_INITIAL_ESTIMATED_WAIT_MINUTES = 15
+
     class Status(models.TextChoices):
         WAITING = 'waiting', 'Waiting'
         NOTIFIED = 'notified', 'Notified'
@@ -151,6 +155,14 @@ class WaitlistEntry(models.Model):
 
     guest_name = models.CharField(max_length=255)
     party_size = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    public_identifier = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+    )
+    estimated_wait_minutes = models.PositiveIntegerField(
+        default=DEFAULT_INITIAL_ESTIMATED_WAIT_MINUTES
+    )
     contact_text = models.CharField(max_length=255, blank=True)
     preference_notes = models.TextField(blank=True)
     status = models.CharField(
