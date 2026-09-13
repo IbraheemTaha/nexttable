@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - Login{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold">Staff Login</h1>
+<form method="post" class="mt-4 space-y-4">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="rounded bg-gray-900 px-4 py-2 text-white">Log in</button>
+</form>
+{% endblock %}

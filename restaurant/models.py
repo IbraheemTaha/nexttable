@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 
 # Fixed primary key used to enforce the RestaurantSettings singleton.
 #
@@ -85,3 +86,24 @@ class RestaurantSettings(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class WorkerProfile(models.Model):
+    """MVP worker role for a Django auth user."""
+
+    class Role(models.TextChoices):
+        STAFF = 'staff', 'Staff'
+        MANAGER = 'manager', 'Manager'
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='worker_profile',
+    )
+    role = models.CharField(max_length=20, choices=Role.choices)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.user} ({self.get_role_display()})'

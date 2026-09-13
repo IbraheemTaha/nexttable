@@ -1,6 +1,9 @@
 from django.test import TestCase
+from django.contrib.auth import get_user_model
+from django.urls import reverse
 
-from .models import SINGLETON_PK, RestaurantSettings
+from .auth import user_is_manager, user_is_staff_or_manager
+from .models import SINGLETON_PK, RestaurantSettings, WorkerProfile
 
 
 class RestaurantSettingsGetActiveTests(TestCase):
@@ -63,3 +66,133 @@ class RestaurantSettingsGetActiveTests(TestCase):
         self.assertEqual(refreshed.pk, SINGLETON_PK)
         self.assertEqual(refreshed.name, 'Second Attempt')
         self.assertEqual(refreshed.created_at, original_created_at)
+
+
+class WorkerAuthorizationTests(TestCase):
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.staff_user = user_model.objects.create_user(
+            username='staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+        cls.manager_user = user_model.objects.create_user(
+            username='manager',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.manager_user,
+            role=WorkerProfile.Role.MANAGER,
+        )
+        cls.no_role_user = user_model.objects.create_user(
+            username='plain',
+            password=cls.password,
+        )
+
+    def test_staff_or_manager_check_allows_staff_and_manager_only(self):
+        self.assertTrue(user_is_staff_or_manager(self.staff_user))
+        self.assertTrue(user_is_staff_or_manager(self.manager_user))
+        self.assertFalse(user_is_staff_or_manager(self.no_role_user))
+        self.assertFalse(user_is_staff_or_manager(self.client.get('/').wsgi_request.user))
+
+    def test_manager_check_allows_manager_only(self):
+        self.assertFalse(user_is_manager(self.staff_user))
+        self.assertTrue(user_is_manager(self.manager_user))
+        self.assertFalse(user_is_manager(self.no_role_user))
+        self.assertFalse(user_is_manager(self.client.get('/').wsgi_request.user))
+
+    def test_auth_urls_can_be_reversed(self):
+        self.assertEqual(reverse('login'), '/accounts/login/')
+        self.assertEqual(reverse('logout'), '/accounts/logout/')
+
+    def test_valid_login_redirects_to_staff_landing(self):
+        response = self.client.post(
+            reverse('login'),
+            {'username': 'staff', 'password': self.password},
+        )
+
+        self.assertRedirects(response, reverse('restaurant:staff_landing'))
+
+    def test_valid_login_redirects_to_next_url_when_provided(self):
+        next_url = reverse('restaurant:manager_landing')
+        response = self.client.post(
+            f'{reverse("login")}?next={next_url}',
+            {'username': 'manager', 'password': self.password},
+        )
+
+        self.assertRedirects(response, next_url)
+
+    def test_logout_ends_session_and_redirects_to_non_error_page(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.post(reverse('logout'))
+
+        self.assertRedirects(response, reverse('placeholder'))
+        follow_up = self.client.get(reverse('restaurant:staff_landing'))
+        self.assertEqual(follow_up.status_code, 302)
+        self.assertIn(reverse('login'), follow_up['Location'])
+
+    def test_anonymous_user_is_redirected_from_staff_landing_to_login(self):
+        response = self.client.get(reverse('restaurant:staff_landing'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+        self.assertIn('next=/staff/', response['Location'])
+
+    def test_staff_user_can_view_staff_landing(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:staff_landing'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="staff-landing-marker"')
+
+    def test_manager_user_can_view_staff_landing(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(reverse('restaurant:staff_landing'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="staff-landing-marker"')
+
+    def test_no_role_user_is_denied_staff_landing(self):
+        self.client.force_login(self.no_role_user)
+
+        response = self.client.get(reverse('restaurant:staff_landing'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_user_is_redirected_from_manager_landing_to_login(self):
+        response = self.client.get(reverse('restaurant:manager_landing'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+        self.assertIn('next=/manager/', response['Location'])
+
+    def test_staff_user_is_denied_manager_landing(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:manager_landing'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_manager_user_can_view_manager_landing(self):
+        self.client.force_login(self.manager_user)
+
+        response = self.client.get(reverse('restaurant:manager_landing'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="manager-landing-marker"')
+
+    def test_no_role_user_is_denied_manager_landing(self):
+        self.client.force_login(self.no_role_user)
+
+        response = self.client.get(reverse('restaurant:manager_landing'))
+
+        self.assertEqual(response.status_code, 403)
