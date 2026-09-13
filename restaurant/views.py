@@ -1,9 +1,12 @@
 from django.contrib.auth import get_user_model
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from .auth import manager_required, staff_or_manager_required
+from .check_in_tokens import is_valid_check_in_token
 from .forms import (
+    GuestCheckInForm,
     RestaurantTableForm,
     WorkerAccountCreateForm,
     WorkerAccountEditForm,
@@ -19,6 +22,46 @@ def staff_landing(request):
 @manager_required
 def manager_landing(request):
     return render(request, 'restaurant/manager_landing.html')
+
+
+def guest_check_in(request, token):
+    token_state = _check_in_token_state(token)
+    if token_state != 'valid':
+        return render(
+            request,
+            'restaurant/guest_check_in.html',
+            {'token_state': token_state},
+        )
+
+    return render(
+        request,
+        'restaurant/guest_check_in.html',
+        {
+            'form': GuestCheckInForm(),
+            'token': token,
+            'token_state': token_state,
+        },
+    )
+
+
+def guest_check_in_submit(request, token):
+    token_state = _check_in_token_state(token)
+    return render(
+        request,
+        'restaurant/guest_check_in.html',
+        {'token_state': token_state, 'submission_unavailable': True},
+    )
+
+
+def _check_in_token_state(token):
+    if is_valid_check_in_token(token):
+        return 'valid'
+
+    previous_day = timezone.localdate() - timezone.timedelta(days=1)
+    if is_valid_check_in_token(token, for_date=previous_day):
+        return 'expired'
+
+    return 'invalid'
 
 
 @manager_required

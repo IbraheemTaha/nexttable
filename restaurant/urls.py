@@ -5,6 +5,16 @@ from . import views
 app_name = 'restaurant'
 
 urlpatterns = [
+    path(
+        'check-in/<str:token>/',
+        views.guest_check_in,
+        name='guest_check_in',
+    ),
+    path(
+        'check-in/<str:token>/submit/',
+        views.guest_check_in_submit,
+        name='guest_check_in_submit',
+    ),
     path('staff/', views.staff_landing, name='staff_landing'),
     path('manager/', views.manager_landing, name='manager_landing'),
     path(

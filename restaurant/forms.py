@@ -5,6 +5,23 @@ from django.contrib.auth.password_validation import validate_password
 from .models import RestaurantTable, WorkerProfile
 
 
+LOCATION_PREFERENCE_CHOICES = (
+    ('no_preference', 'No preference'),
+    ('indoor', 'Indoor'),
+    ('outdoor', 'Outdoor'),
+)
+SEATING_PREFERENCE_CHOICES = (
+    ('no_preference', 'No preference'),
+    ('standard', 'Standard table'),
+    ('booth', 'Booth'),
+    ('bar', 'Bar seating'),
+)
+HIGH_CHAIR_CHOICES = (
+    ('no', 'No'),
+    ('yes', 'Yes'),
+)
+
+
 ROLE_CHOICES = (
     (WorkerProfile.Role.STAFF, WorkerProfile.Role.STAFF.label),
     (WorkerProfile.Role.MANAGER, WorkerProfile.Role.MANAGER.label),
@@ -136,3 +153,43 @@ class RestaurantTableForm(forms.ModelForm):
         if capacity <= 0:
             raise forms.ValidationError('Capacity must be greater than zero.')
         return capacity
+
+
+class GuestCheckInForm(forms.Form):
+    guest_name = forms.CharField(label='Guest name', max_length=255)
+    party_size = forms.IntegerField(
+        label='Party size',
+        min_value=1,
+        widget=forms.NumberInput(attrs={'min': 1}),
+    )
+    phone_number = forms.CharField(
+        label='Phone number',
+        max_length=255,
+        required=False,
+    )
+    location_preference = forms.ChoiceField(
+        label='Indoor/outdoor preference',
+        choices=LOCATION_PREFERENCE_CHOICES,
+        required=False,
+    )
+    seating_preference = forms.ChoiceField(
+        label='Seating preference',
+        choices=SEATING_PREFERENCE_CHOICES,
+        required=False,
+    )
+    accessibility_requirements = forms.CharField(
+        label='Accessibility requirements',
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )
+    high_chair_needed = forms.ChoiceField(
+        label='High chair need',
+        choices=HIGH_CHAIR_CHOICES,
+        required=False,
+        widget=forms.RadioSelect,
+    )
+    notes = forms.CharField(
+        label='Notes',
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3}),
+    )

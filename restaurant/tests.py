@@ -116,6 +116,119 @@ class CheckInTokenTests(TestCase):
         )
 
 
+class GuestCheckInPageTests(TestCase):
+    def test_public_guest_can_render_form_with_current_token(self):
+        token = get_current_check_in_token()
+
+        response = self.client.get(
+            reverse('restaurant:guest_check_in', args=[token])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="guest-check-in-marker"')
+        self.assertContains(response, 'Join waitlist')
+        self.assertNotContains(response, reverse('login'))
+
+    def test_form_contains_required_and_optional_fields(self):
+        token = get_current_check_in_token()
+
+        response = self.client.get(
+            reverse('restaurant:guest_check_in', args=[token])
+        )
+
+        required_fields = ['guest_name', 'party_size']
+        optional_fields = [
+            'phone_number',
+            'location_preference',
+            'seating_preference',
+            'accessibility_requirements',
+            'high_chair_needed',
+            'notes',
+        ]
+        for field_name in required_fields + optional_fields:
+            with self.subTest(field_name=field_name):
+                self.assertContains(response, f'name="{field_name}"')
+
+        self.assertContains(response, 'Required', count=2)
+        self.assertContains(response, 'Optional', count=len(optional_fields))
+
+    def test_form_uses_numeric_and_constrained_controls(self):
+        token = get_current_check_in_token()
+
+        response = self.client.get(
+            reverse('restaurant:guest_check_in', args=[token])
+        )
+
+        self.assertContains(response, 'name="party_size"')
+        self.assertContains(response, 'type="number"')
+        self.assertContains(response, 'min="1"')
+        self.assertContains(response, 'name="location_preference"')
+        self.assertContains(response, 'value="indoor"')
+        self.assertContains(response, 'value="outdoor"')
+        self.assertContains(response, 'name="seating_preference"')
+        self.assertContains(response, 'value="booth"')
+        self.assertContains(response, 'name="high_chair_needed"')
+        self.assertContains(response, 'value="yes"')
+
+    def test_form_posts_to_guest_check_in_submission_endpoint(self):
+        token = get_current_check_in_token()
+
+        response = self.client.get(
+            reverse('restaurant:guest_check_in', args=[token])
+        )
+
+        self.assertContains(
+            response,
+            f'action="{reverse("restaurant:guest_check_in_submit", args=[token])}"',
+        )
+
+    def test_invalid_token_displays_unavailable_state_without_login(self):
+        response = self.client.get(
+            reverse('restaurant:guest_check_in', args=['not-a-real-token'])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="guest-check-in-invalid-marker"')
+        self.assertContains(response, 'not available')
+        self.assertNotContains(response, 'name="guest_name"')
+        self.assertNotContains(response, reverse('login'))
+
+    def test_expired_token_displays_expired_state_without_login(self):
+        previous_day = timezone.localdate() - timezone.timedelta(days=1)
+        old_token = get_current_check_in_token(for_date=previous_day)
+
+        response = self.client.get(
+            reverse('restaurant:guest_check_in', args=[old_token])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="guest-check-in-expired-marker"')
+        self.assertContains(response, 'has expired')
+        self.assertNotContains(response, 'name="guest_name"')
+        self.assertNotContains(response, reverse('login'))
+
+    def test_post_does_not_create_waitlist_entry_before_submission_issue(self):
+        token = get_current_check_in_token()
+
+        response = self.client.post(
+            reverse('restaurant:guest_check_in_submit', args=[token]),
+            {
+                'guest_name': 'Ada Lovelace',
+                'party_size': '2',
+                'phone_number': '555-0101',
+                'location_preference': 'indoor',
+                'seating_preference': 'booth',
+                'accessibility_requirements': '',
+                'high_chair_needed': 'no',
+                'notes': 'Near a window if possible',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="guest-check-in-unavailable-marker"')
+        self.assertEqual(WaitlistEntry.objects.count(), 0)
+
+
 class RestaurantSettingsGetActiveTests(TestCase):
     def test_lazily_creates_row_with_defaults_on_empty_database(self):
         self.assertEqual(RestaurantSettings.objects.count(), 0)

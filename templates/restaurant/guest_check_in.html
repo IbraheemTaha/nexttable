@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - Guest Check-In{% endblock %}
+
+{% block content %}
+<h1 id="guest-check-in-marker" class="text-2xl font-bold">Guest Check-In</h1>
+
+{% if token_state == "valid" and form %}
+    <p class="mt-2 text-gray-600">Join the waitlist for today's service.</p>
+
+    <form method="post" action="{% url 'restaurant:guest_check_in_submit' token %}" class="mt-4">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+
+        {% for field in form %}
+            <div class="mt-3">
+                {{ field.label_tag }}
+                {% if field.field.required %}
+                    <span class="text-red-700" aria-label="required">Required</span>
+                {% else %}
+                    <span class="text-gray-600">Optional</span>
+                {% endif %}
+                <div>{{ field }}</div>
+                {{ field.errors }}
+            </div>
+        {% endfor %}
+
+        <button type="submit" class="mt-4">Join waitlist</button>
+    </form>
+{% elif token_state == "expired" %}
+    <p id="guest-check-in-expired-marker" class="mt-2">
+        This check-in link has expired. Please scan today's code or ask the host for help.
+    </p>
+{% elif submission_unavailable %}
+    <p id="guest-check-in-unavailable-marker" class="mt-2">
+        Online check-in submission is not available yet. Please ask the host for help.
+    </p>
+{% else %}
+    <p id="guest-check-in-invalid-marker" class="mt-2">
+        This check-in link is not available. Please scan today's code or ask the host for help.
+    </p>
+{% endif %}
+{% endblock %}
