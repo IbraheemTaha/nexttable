@@ -23,6 +23,7 @@ from .models import (
     WaitlistEntry,
     WorkerProfile,
 )
+from .services import calculate_estimated_wait_minutes, check_table_compatibility
 
 
 class CheckInTokenTests(TestCase):
@@ -1899,3 +1900,732 @@ class EtaConfigurationTests(TestCase):
 
         settings.refresh_from_db()
         self.assertEqual(settings.grace_period_minutes, 45)
+
+
+class WaitEstimateCalculationTests(TestCase):
+    """Tests for the calculate_estimated_wait_minutes service function."""
+
+    def setUp(self):
+        """Set up test ETA rules and clean up any existing entries."""
+        EtaRule.objects.all().delete()
+        WaitlistEntry.objects.all().delete()
+        RestaurantTable.objects.all().delete()
+
+        # Create standard rules for testing
+        self.rule_1_2 = EtaRule.objects.create(
+            min_party_size=1,
+            max_party_size=2,
+            estimated_wait_minutes=15,
+            is_active=True,
+        )
+        self.rule_3_4 = EtaRule.objects.create(
+            min_party_size=3,
+            max_party_size=4,
+            estimated_wait_minutes=25,
+            is_active=True,
+        )
+        self.rule_5_plus = EtaRule.objects.create(
+            min_party_size=5,
+            max_party_size=None,
+            estimated_wait_minutes=35,
+            is_active=True,
+        )
+
+    def test_validates_party_size(self):
+        """Party size must be positive."""
+        with self.assertRaises(ValidationError):
+            calculate_estimated_wait_minutes(0)
+        with self.assertRaises(ValidationError):
+            calculate_estimated_wait_minutes(-1)
+        with self.assertRaises(ValidationError):
+            calculate_estimated_wait_minutes('not a number')
+
+    def test_returns_base_estimate_with_empty_queue(self):
+        """With no queue, estimate should be base * (0 + 1) = base."""
+        estimate = calculate_estimated_wait_minutes(2)
+        self.assertEqual(estimate, 15)
+
+    def test_matches_party_size_to_correct_rule(self):
+        """Estimate should use the correct rule for each party size."""
+        self.assertEqual(calculate_estimated_wait_minutes(1), 15)
+        self.assertEqual(calculate_estimated_wait_minutes(2), 15)
+        self.assertEqual(calculate_estimated_wait_minutes(3), 25)
+        self.assertEqual(calculate_estimated_wait_minutes(4), 25)
+        self.assertEqual(calculate_estimated_wait_minutes(5), 35)
+        self.assertEqual(calculate_estimated_wait_minutes(10), 35)
+
+    def test_estimate_multiplies_with_queue_size(self):
+        """Estimate should be base * (queue_position + 1)."""
+        base_estimate = calculate_estimated_wait_minutes(2)
+        self.assertEqual(base_estimate, 15)  # base * (0 + 1) = 15
+
+        # Add one waiting party
+        WaitlistEntry.objects.create(
+            guest_name='Guest 1', party_size=2, status=WaitlistEntry.Status.WAITING
+        )
+        estimate_with_one = calculate_estimated_wait_minutes(2)
+        self.assertEqual(estimate_with_one, 30)  # 15 * (1 + 1) = 30
+
+        # Add another waiting party
+        WaitlistEntry.objects.create(
+            guest_name='Guest 2', party_size=1, status=WaitlistEntry.Status.WAITING
+        )
+        estimate_with_two = calculate_estimated_wait_minutes(2)
+        self.assertEqual(estimate_with_two, 45)  # 15 * (2 + 1) = 45
+
+    def test_notified_guests_not_in_queue(self):
+        """Notified guests should not be counted in queue calculation."""
+        WaitlistEntry.objects.create(
+            guest_name='Waiting Guest', party_size=2, status=WaitlistEntry.Status.WAITING
+        )
+        WaitlistEntry.objects.create(
+            guest_name='Notified Guest', party_size=2, status=WaitlistEntry.Status.NOTIFIED
+        )
+
+        estimate = calculate_estimated_wait_minutes(2)
+        # Only waiting guest counted: 15 * (1 + 1) = 30
+        self.assertEqual(estimate, 30)
+
+    def test_seated_guests_not_in_queue(self):
+        """Seated and other completed statuses should not affect queue."""
+        excluded_statuses = [
+            WaitlistEntry.Status.SEATED,
+            WaitlistEntry.Status.ARRIVED,
+            WaitlistEntry.Status.CANCELLED,
+            WaitlistEntry.Status.NO_SHOW,
+            WaitlistEntry.Status.LEFT,
+            WaitlistEntry.Status.NOTIFIED,
+        ]
+
+        for status in excluded_statuses:
+            WaitlistEntry.objects.create(
+                guest_name=f'Guest {status}',
+                party_size=2,
+                status=status,
+            )
+
+        estimate = calculate_estimated_wait_minutes(2)
+        # Queue should be empty (no WAITING or LATE_DEMOTED), so just the base estimate
+        self.assertEqual(estimate, 15)
+
+    def test_late_demoted_guests_counted_in_queue(self):
+        """Late/demoted guests should be counted in queue like waiting guests."""
+        WaitlistEntry.objects.create(
+            guest_name='Waiting Guest', party_size=2, status=WaitlistEntry.Status.WAITING
+        )
+        WaitlistEntry.objects.create(
+            guest_name='Demoted Guest', party_size=2, status=WaitlistEntry.Status.LATE_DEMOTED
+        )
+
+        estimate = calculate_estimated_wait_minutes(2)
+        # Two parties in queue: 15 * (2 + 1) = 45
+        self.assertEqual(estimate, 45)
+
+    def test_table_availability_not_used_in_calculation(self):
+        """Table availability is considered for future optimization but not used in MVP."""
+        # With or without tables, the calculation is the same
+        estimate_no_tables = calculate_estimated_wait_minutes(2)
+        self.assertEqual(estimate_no_tables, 15)
+
+        RestaurantTable.objects.create(
+            identifier='Table 1', capacity=2, status=RestaurantTable.Status.FREE
+        )
+        estimate_with_table = calculate_estimated_wait_minutes(2)
+        # Still the same - table availability doesn't affect MVP algorithm
+        self.assertEqual(estimate_with_table, 15)
+
+    def test_no_applicable_rule_returns_default(self):
+        """If no ETA rule matches, return the default estimate."""
+        EtaRule.objects.all().delete()
+        # No rules at all
+        estimate = calculate_estimated_wait_minutes(5)
+        self.assertEqual(estimate, WaitlistEntry.DEFAULT_INITIAL_ESTIMATED_WAIT_MINUTES)
+
+    def test_inactive_rule_not_used(self):
+        """Inactive ETA rules should not be used in calculation."""
+        self.rule_3_4.is_active = False
+        self.rule_3_4.save()
+
+        # Now party of 3-4 has no active rule
+        estimate = calculate_estimated_wait_minutes(3)
+        self.assertEqual(estimate, WaitlistEntry.DEFAULT_INITIAL_ESTIMATED_WAIT_MINUTES)
+
+    def test_calculation_at_rule_boundaries(self):
+        """Test party sizes at the boundaries of rule ranges."""
+        # Test lower boundary
+        estimate_1 = calculate_estimated_wait_minutes(1)
+        self.assertEqual(estimate_1, 15)  # min_party_size=1
+
+        # Test upper boundary of first rule
+        estimate_2 = calculate_estimated_wait_minutes(2)
+        self.assertEqual(estimate_2, 15)  # max_party_size=2
+
+        # Test lower boundary of second rule
+        estimate_3 = calculate_estimated_wait_minutes(3)
+        self.assertEqual(estimate_3, 25)  # min_party_size=3
+
+        # Test upper boundary of second rule
+        estimate_4 = calculate_estimated_wait_minutes(4)
+        self.assertEqual(estimate_4, 25)  # max_party_size=4
+
+        # Test lower boundary of open-ended rule
+        estimate_5 = calculate_estimated_wait_minutes(5)
+        self.assertEqual(estimate_5, 35)  # min_party_size=5
+
+        # Test higher value in open-ended rule
+        estimate_20 = calculate_estimated_wait_minutes(20)
+        self.assertEqual(estimate_20, 35)  # max_party_size=None
+
+
+class GuestCheckInFormIntegrationTests(TestCase):
+    """Tests that the wait estimate calculation is properly integrated."""
+
+    def setUp(self):
+        """Set up test ETA rules."""
+        EtaRule.objects.all().delete()
+        WaitlistEntry.objects.all().delete()
+        RestaurantTable.objects.all().delete()
+
+        self.rule = EtaRule.objects.create(
+            min_party_size=1,
+            max_party_size=2,
+            estimated_wait_minutes=15,
+            is_active=True,
+        )
+
+    def test_check_in_form_uses_calculated_estimate_not_default(self):
+        """The form should use the calculated estimate, not the default."""
+        token = get_current_check_in_token()
+
+        # Manually create a queue by adding waiting guests
+        WaitlistEntry.objects.create(
+            guest_name='Queue 1', party_size=2, status=WaitlistEntry.Status.WAITING
+        )
+        WaitlistEntry.objects.create(
+            guest_name='Queue 2', party_size=2, status=WaitlistEntry.Status.WAITING
+        )
+
+        response = self.client.post(
+            reverse('restaurant:guest_check_in_submit', args=[token]),
+            {
+                'guest_name': 'Test Guest',
+                'party_size': '2',
+                'phone_number': '',
+                'location_preference': 'no_preference',
+                'seating_preference': 'no_preference',
+                'accessibility_requirements': '',
+                'high_chair_needed': 'no',
+                'notes': '',
+            },
+        )
+
+        entry = WaitlistEntry.objects.get(guest_name='Test Guest')
+        # 2 waiting guests ahead: 15 * (2 + 1) = 45
+        self.assertEqual(entry.estimated_wait_minutes, 45)
+
+    def test_check_in_with_empty_queue_uses_base_estimate(self):
+        """With no queue, the base estimate should be used."""
+        token = get_current_check_in_token()
+
+        response = self.client.post(
+            reverse('restaurant:guest_check_in_submit', args=[token]),
+            {
+                'guest_name': 'Solo Guest',
+                'party_size': '1',
+                'phone_number': '',
+                'location_preference': 'no_preference',
+                'seating_preference': 'no_preference',
+                'accessibility_requirements': '',
+                'high_chair_needed': 'no',
+                'notes': '',
+            },
+        )
+
+        entry = WaitlistEntry.objects.get(guest_name='Solo Guest')
+        self.assertEqual(entry.estimated_wait_minutes, 15)
+
+    def test_different_party_sizes_use_different_rules(self):
+        """Different party sizes should use their own ETA rules."""
+        EtaRule.objects.create(
+            min_party_size=3,
+            max_party_size=4,
+            estimated_wait_minutes=25,
+            is_active=True,
+        )
+
+        token = get_current_check_in_token()
+
+        # Check in a party of 2
+        self.client.post(
+            reverse('restaurant:guest_check_in_submit', args=[token]),
+            {
+                'guest_name': 'Two Guests',
+                'party_size': '2',
+                'phone_number': '',
+                'location_preference': 'no_preference',
+                'seating_preference': 'no_preference',
+                'accessibility_requirements': '',
+                'high_chair_needed': 'no',
+                'notes': '',
+            },
+        )
+
+        # Check in a party of 4
+        self.client.post(
+            reverse('restaurant:guest_check_in_submit', args=[token]),
+            {
+                'guest_name': 'Four Guests',
+                'party_size': '4',
+                'phone_number': '',
+                'location_preference': 'no_preference',
+                'seating_preference': 'no_preference',
+                'accessibility_requirements': '',
+                'high_chair_needed': 'no',
+                'notes': '',
+            },
+        )
+
+        two_party = WaitlistEntry.objects.get(guest_name='Two Guests')
+        four_party = WaitlistEntry.objects.get(guest_name='Four Guests')
+
+        # Two party: base 15 * (0 + 1) = 15 (they're first)
+        self.assertEqual(two_party.estimated_wait_minutes, 15)
+        # Four party: base 25 * (1 + 1) = 50 (one party of 2 ahead)
+        self.assertEqual(four_party.estimated_wait_minutes, 50)
+
+
+class TableCompatibilityTests(TestCase):
+    """Tests for the check_table_compatibility service function."""
+
+    def setUp(self):
+        """Set up test tables and waitlist entries."""
+        WaitlistEntry.objects.all().delete()
+        RestaurantTable.objects.all().delete()
+
+        # Create a standard compatible table
+        self.standard_table = RestaurantTable.objects.create(
+            identifier='Standard Table',
+            capacity=4,
+            location=RestaurantTable.Location.ANY,
+            seating_type=RestaurantTable.SeatingType.STANDARD,
+            has_accessibility=False,
+            can_accommodate_high_chair=False,
+        )
+
+        # Create an accessible table
+        self.accessible_table = RestaurantTable.objects.create(
+            identifier='Accessible Table',
+            capacity=4,
+            location=RestaurantTable.Location.ANY,
+            seating_type=RestaurantTable.SeatingType.STANDARD,
+            has_accessibility=True,
+            can_accommodate_high_chair=False,
+        )
+
+        # Create a booth
+        self.booth = RestaurantTable.objects.create(
+            identifier='Booth 1',
+            capacity=4,
+            location=RestaurantTable.Location.ANY,
+            seating_type=RestaurantTable.SeatingType.BOOTH,
+            has_accessibility=False,
+            can_accommodate_high_chair=False,
+        )
+
+        # Create an indoor-only table
+        self.indoor_table = RestaurantTable.objects.create(
+            identifier='Indoor Table',
+            capacity=4,
+            location=RestaurantTable.Location.INDOOR,
+            seating_type=RestaurantTable.SeatingType.STANDARD,
+            has_accessibility=False,
+            can_accommodate_high_chair=False,
+        )
+
+        # Create an outdoor-only table
+        self.outdoor_table = RestaurantTable.objects.create(
+            identifier='Outdoor Table',
+            capacity=4,
+            location=RestaurantTable.Location.OUTDOOR,
+            seating_type=RestaurantTable.SeatingType.STANDARD,
+            has_accessibility=False,
+            can_accommodate_high_chair=False,
+        )
+
+        # Create a high-chair-capable table
+        self.high_chair_table = RestaurantTable.objects.create(
+            identifier='High Chair Table',
+            capacity=4,
+            location=RestaurantTable.Location.ANY,
+            seating_type=RestaurantTable.SeatingType.STANDARD,
+            has_accessibility=False,
+            can_accommodate_high_chair=True,
+        )
+
+    def test_type_checking_rejects_non_table_argument(self):
+        """Function should raise TypeError if table is not RestaurantTable."""
+        entry = WaitlistEntry.objects.create(guest_name='Test', party_size=2)
+        with self.assertRaises(TypeError):
+            check_table_compatibility('not a table', entry)
+
+    def test_type_checking_rejects_non_entry_argument(self):
+        """Function should raise TypeError if entry is not WaitlistEntry."""
+        with self.assertRaises(TypeError):
+            check_table_compatibility(self.standard_table, 'not an entry')
+
+    def test_capacity_sufficient_returns_compatible(self):
+        """Compatible table should return True."""
+        entry = WaitlistEntry.objects.create(guest_name='Test', party_size=2)
+        self.assertTrue(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_capacity_mismatch_party_too_large(self):
+        """Party larger than table capacity should return False."""
+        entry = WaitlistEntry.objects.create(guest_name='Test', party_size=5)
+        self.assertFalse(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_capacity_equal_to_table_capacity_is_compatible(self):
+        """Party size equal to capacity should be compatible."""
+        entry = WaitlistEntry.objects.create(guest_name='Test', party_size=4)
+        self.assertTrue(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_accessibility_requirement_satisfied(self):
+        """Guest with accessibility needs should match accessible table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Accessibility requirements: Wheelchair access',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.accessible_table, entry)
+        )
+
+    def test_accessibility_requirement_not_satisfied(self):
+        """Guest with accessibility needs should not match non-accessible table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Accessibility requirements: Wheelchair access',
+        )
+        self.assertFalse(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_no_accessibility_preference_works_with_any_table(self):
+        """Guest without accessibility needs should work with any table."""
+        entry = WaitlistEntry.objects.create(guest_name='Test', party_size=2)
+        self.assertTrue(
+            check_table_compatibility(self.standard_table, entry)
+        )
+        self.assertTrue(
+            check_table_compatibility(self.accessible_table, entry)
+        )
+
+    def test_indoor_preference_satisfied_by_indoor_table(self):
+        """Guest preferring indoor should match indoor table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Indoor/outdoor preference: indoor',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.indoor_table, entry)
+        )
+
+    def test_indoor_preference_not_satisfied_by_outdoor_table(self):
+        """Guest preferring indoor should not match outdoor table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Indoor/outdoor preference: indoor',
+        )
+        self.assertFalse(
+            check_table_compatibility(self.outdoor_table, entry)
+        )
+
+    def test_outdoor_preference_satisfied_by_outdoor_table(self):
+        """Guest preferring outdoor should match outdoor table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Indoor/outdoor preference: outdoor',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.outdoor_table, entry)
+        )
+
+    def test_outdoor_preference_not_satisfied_by_indoor_table(self):
+        """Guest preferring outdoor should not match indoor table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Indoor/outdoor preference: outdoor',
+        )
+        self.assertFalse(
+            check_table_compatibility(self.indoor_table, entry)
+        )
+
+    def test_no_location_preference_works_with_any_location(self):
+        """Guest with no location preference should work with any location."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Indoor/outdoor preference: no_preference',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.indoor_table, entry)
+        )
+        self.assertTrue(
+            check_table_compatibility(self.outdoor_table, entry)
+        )
+        self.assertTrue(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_location_any_matches_any_preference(self):
+        """Table with 'any' location should match any guest preference."""
+        for preference in ['indoor', 'outdoor', 'no_preference']:
+            with self.subTest(preference=preference):
+                entry = WaitlistEntry.objects.create(
+                    guest_name=f'Test {preference}',
+                    party_size=2,
+                    preference_notes=(
+                        f'Indoor/outdoor preference: {preference}'
+                    ),
+                )
+                self.assertTrue(
+                    check_table_compatibility(self.standard_table, entry)
+                )
+
+    def test_seating_preference_booth_satisfied(self):
+        """Guest preferring booth should match booth seating."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Seating preference: Booth',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.booth, entry)
+        )
+
+    def test_seating_preference_booth_not_satisfied_by_standard(self):
+        """Guest preferring booth should not match standard table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Seating preference: Booth',
+        )
+        self.assertFalse(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_seating_preference_standard_satisfied(self):
+        """Guest preferring standard table should match standard seating."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Seating preference: Standard table',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_no_seating_preference_works_with_any_seating(self):
+        """Guest with no seating preference should work with any seating."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Seating preference: No preference',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.standard_table, entry)
+        )
+        self.assertTrue(
+            check_table_compatibility(self.booth, entry)
+        )
+
+    def test_high_chair_requirement_satisfied(self):
+        """Guest needing high chair should match high-chair table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='High chair need: yes',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.high_chair_table, entry)
+        )
+
+    def test_high_chair_requirement_not_satisfied(self):
+        """Guest needing high chair should not match non-high-chair table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='High chair need: yes',
+        )
+        self.assertFalse(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_no_high_chair_needed_works_with_any_table(self):
+        """Guest not needing high chair should work with any table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='High chair need: no',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.standard_table, entry)
+        )
+        self.assertTrue(
+            check_table_compatibility(self.high_chair_table, entry)
+        )
+
+    def test_combined_requirements_all_satisfied(self):
+        """Table satisfying all requirements should be compatible."""
+        # Create a premium table with all features
+        premium_table = RestaurantTable.objects.create(
+            identifier='Premium',
+            capacity=6,
+            location=RestaurantTable.Location.INDOOR,
+            seating_type=RestaurantTable.SeatingType.BOOTH,
+            has_accessibility=True,
+            can_accommodate_high_chair=True,
+        )
+
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=4,
+            preference_notes=(
+                'Indoor/outdoor preference: indoor\n'
+                'Seating preference: Booth\n'
+                'Accessibility requirements: Wheelchair access\n'
+                'High chair need: yes'
+            ),
+        )
+        self.assertTrue(
+            check_table_compatibility(premium_table, entry)
+        )
+
+    def test_combined_requirements_capacity_fails(self):
+        """Table failing on capacity should be incompatible even with other features."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=5,
+            preference_notes=(
+                'Indoor/outdoor preference: indoor\n'
+                'Seating preference: Booth'
+            ),
+        )
+        # Booth has capacity 4, insufficient for party of 5
+        self.assertFalse(
+            check_table_compatibility(self.booth, entry)
+        )
+
+    def test_combined_requirements_accessibility_fails(self):
+        """Table failing on accessibility should be incompatible."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes=(
+                'Indoor/outdoor preference: indoor\n'
+                'Accessibility requirements: Wheelchair access'
+            ),
+        )
+        # Indoor table is not accessible
+        self.assertFalse(
+            check_table_compatibility(self.indoor_table, entry)
+        )
+
+    def test_combined_requirements_location_fails(self):
+        """Table failing on location should be incompatible."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Indoor/outdoor preference: outdoor',
+        )
+        # Indoor table doesn't match outdoor preference
+        self.assertFalse(
+            check_table_compatibility(self.indoor_table, entry)
+        )
+
+    def test_combined_requirements_seating_fails(self):
+        """Table failing on seating should be incompatible."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Seating preference: Booth',
+        )
+        # Standard table doesn't have booth seating
+        self.assertFalse(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_combined_requirements_high_chair_fails(self):
+        """Table failing on high chair should be incompatible."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='High chair need: yes',
+        )
+        # Standard table has no high chair
+        self.assertFalse(
+            check_table_compatibility(self.standard_table, entry)
+        )
+
+    def test_empty_preference_notes_is_compatible(self):
+        """Entry with no preference notes should be compatible with any table."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='',
+        )
+        self.assertTrue(
+            check_table_compatibility(self.standard_table, entry)
+        )
+        self.assertTrue(
+            check_table_compatibility(self.accessible_table, entry)
+        )
+        self.assertTrue(
+            check_table_compatibility(self.booth, entry)
+        )
+
+    def test_deterministic_function(self):
+        """Function should return same result for same inputs."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Indoor/outdoor preference: indoor',
+        )
+
+        result1 = check_table_compatibility(self.indoor_table, entry)
+        result2 = check_table_compatibility(self.indoor_table, entry)
+        result3 = check_table_compatibility(self.indoor_table, entry)
+
+        self.assertEqual(result1, result2)
+        self.assertEqual(result2, result3)
+        self.assertTrue(result1)
+
+    def test_function_does_not_modify_inputs(self):
+        """Function should not modify table or entry objects."""
+        entry = WaitlistEntry.objects.create(
+            guest_name='Test',
+            party_size=2,
+            preference_notes='Indoor/outdoor preference: indoor',
+        )
+
+        original_preference_notes = entry.preference_notes
+        original_party_size = entry.party_size
+        original_table_capacity = self.indoor_table.capacity
+        original_table_location = self.indoor_table.location
+
+        check_table_compatibility(self.indoor_table, entry)
+
+        self.assertEqual(entry.preference_notes, original_preference_notes)
+        self.assertEqual(entry.party_size, original_party_size)
+        self.assertEqual(self.indoor_table.capacity, original_table_capacity)
+        self.assertEqual(self.indoor_table.location, original_table_location)

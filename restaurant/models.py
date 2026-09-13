@@ -123,12 +123,42 @@ class RestaurantTable(models.Model):
         OCCUPIED = 'occupied', 'Occupied'
         CLEANING = 'cleaning', 'Cleaning'
 
+    class Location(models.TextChoices):
+        ANY = 'any', 'Any'
+        INDOOR = 'indoor', 'Indoor'
+        OUTDOOR = 'outdoor', 'Outdoor'
+
+    class SeatingType(models.TextChoices):
+        STANDARD = 'standard', 'Standard table'
+        BOOTH = 'booth', 'Booth'
+        BAR = 'bar', 'Bar seating'
+
     identifier = models.CharField(max_length=80, unique=True)
     capacity = models.PositiveIntegerField(validators=[MinValueValidator(1)])
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
         default=Status.FREE,
+    )
+    location = models.CharField(
+        max_length=20,
+        choices=Location.choices,
+        default=Location.ANY,
+        help_text='Table location preference match',
+    )
+    seating_type = models.CharField(
+        max_length=20,
+        choices=SeatingType.choices,
+        default=SeatingType.STANDARD,
+        help_text='Type of seating at this table',
+    )
+    has_accessibility = models.BooleanField(
+        default=False,
+        help_text='Wheelchair accessible or other accessibility features',
+    )
+    can_accommodate_high_chair = models.BooleanField(
+        default=False,
+        help_text='Can accommodate a high chair',
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
