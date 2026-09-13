@@ -9,7 +9,7 @@ venv/
 
 # Django
 *.sqlite3
-/staticfiles/
+/frontend/staticfiles/
 
 # Environment variables
 .env
@@ -26,4 +26,10 @@ htmlcov/
 
 # Tailwind standalone CLI binary (downloaded locally, not vendored - see
 # docs/setup/tailwind.md)
-/bin/
+/frontend/bin/
+
+
+#agents
+.claude
+.codex
+.wolf

@@ -7,14 +7,14 @@ a single self-contained binary, not an npm package.
 ## One-time setup: download the CLI binary
 
 Download the binary for your platform from the Tailwind CSS GitHub releases
-and put it at `bin/tailwindcss` (gitignored - each machine downloads its own
-copy):
+and put it at `frontend/bin/tailwindcss` (gitignored - each machine downloads
+its own copy):
 
 ```sh
 curl -sL \
   https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-linux-x64 \
-  -o bin/tailwindcss
-chmod +x bin/tailwindcss
+  -o frontend/bin/tailwindcss
+chmod +x frontend/bin/tailwindcss
 ```
 
 (Use `tailwindcss-macos-arm64`, `tailwindcss-macos-x64`, or
@@ -26,28 +26,29 @@ This project was built and tested against Tailwind CLI **v4.3.3**.
 
 ## Source files
 
-- `static/src/input.css` - the Tailwind entry file (`@import "tailwindcss";`
-  plus `@config` pointing at `tailwind.config.js`).
-- `tailwind.config.js` (repo root) - scopes class scanning to
-  `templates/**/*.html`.
+- `frontend/static/src/input.css` - the Tailwind entry file
+  (`@import "tailwindcss";` plus `@config` pointing at `tailwind.config.js`).
+- `frontend/tailwind.config.js` - scopes class scanning to
+  `templates/**/*.html` (relative to `frontend/`).
 
 ## Build command
 
-Run from the repo root whenever templates change and you need to refresh the
+Run from `frontend/` whenever templates change and you need to refresh the
 compiled CSS:
 
 ```sh
+cd frontend
 ./bin/tailwindcss -i ./static/src/input.css -o ./static/css/app.css --minify
 ```
 
-This writes the compiled stylesheet to `static/css/app.css`, inside the
-`STATICFILES_DIRS` source directory (`static/`) configured in
-`config/settings.py`. `templates/base.html` links to it via
+This writes the compiled stylesheet to `frontend/static/css/app.css`, inside
+the `STATICFILES_DIRS` source directory (`frontend/static/`) configured in
+`backend/config/settings.py`. `frontend/templates/base.html` links to it via
 `{% static 'css/app.css' %}`, so it is served directly by `manage.py
 runserver` in development and copied into `STATIC_ROOT` by `manage.py
 collectstatic` for deployment.
 
-The compiled `static/css/app.css` is committed to the repository so the app
-runs out of the box without requiring every clone/CI run to have the
+The compiled `frontend/static/css/app.css` is committed to the repository so
+the app runs out of the box without requiring every clone/CI run to have the
 Tailwind binary available; re-run the build command above and commit the
 result after editing templates or `tailwind.config.js`.

@@ -7,12 +7,12 @@ states what must hold true regardless of where the app is deployed. For the
 day-to-day local dev workflow, see [`docs/development.md`](./development.md).
 
 Every item below is checked against the current codebase
-(`config/settings.py`, `manage.py`, `pyproject.toml`/`requirements.txt`) -
-not generic Django defaults.
+(`backend/config/settings.py`, `backend/manage.py`, `pyproject.toml`) - not
+generic Django defaults.
 
 ## Environment variables
 
-`config/settings.py` reads these from the environment (via `python-dotenv`
+`backend/config/settings.py` reads these from the environment (via `python-dotenv`
 locally, or real environment variables in a deployed environment):
 
 - [ ] `SECRET_KEY` is set to a real, unique, secret value. The code falls
@@ -32,19 +32,16 @@ locally, or real environment variables in a deployed environment):
 ## Dependencies
 
 - [ ] Dependencies are installed from the locked/pinned versions -
-      `uv sync --frozen` (uses `uv.lock`) or `pip install -r
-      requirements.txt` - not resolved fresh against latest releases.
-- [ ] `requirements.txt` is regenerated (`uv export --no-dev --no-hashes -o
-      requirements.txt`) if `pyproject.toml` dependencies changed, so the
-      two stay in sync for any deployment path that uses pip instead of uv.
+      `uv sync --frozen` (uses `uv.lock`) - not resolved fresh against
+      latest releases.
 
 ## Database and migrations
 
 - [ ] All migrations have been applied to the target database:
-      `manage.py migrate`.
+      `backend/manage.py migrate`.
 - [ ] The database is not the default SQLite file
-      (`config/settings.py`'s `DATABASES['default']` points at
-      `BASE_DIR / 'db.sqlite3'`) unless a single-file SQLite database is a
+      (`backend/config/settings.py`'s `DATABASES['default']` points at
+      `REPO_ROOT / 'db.sqlite3'`) unless a single-file SQLite database is a
       deliberate, accepted choice for the deployment target - SQLite has no
       built-in concurrent-write story and the file must live on persistent,
       backed-up storage if used.
@@ -55,10 +52,10 @@ locally, or real environment variables in a deployed environment):
 
 ## Static files
 
-- [ ] `manage.py collectstatic` has been run, gathering static assets
+- [ ] `backend/manage.py collectstatic` has been run, gathering static assets
       (including the compiled Tailwind stylesheet) into `STATIC_ROOT`
-      (`staticfiles/` per `config/settings.py`).
-- [ ] The compiled `static/css/app.css` reflects the current templates - if
+      (`frontend/staticfiles/` per `backend/config/settings.py`).
+- [ ] The compiled `frontend/static/css/app.css` reflects the current templates - if
       templates changed since the last commit that touched CSS, it has been
       rebuilt per `docs/setup/tailwind.md` and collected.
 - [ ] Something other than Django's development server is serving the
@@ -69,7 +66,7 @@ locally, or real environment variables in a deployed environment):
 ## Admin / superuser accounts
 
 - [ ] At least one real superuser account exists for the deployed database,
-      created with `manage.py createsuperuser`, using a strong, unique
+      created with `backend/manage.py createsuperuser`, using a strong, unique
       password - not `devpassword123` or any other credential from
       `seed_demo_data`.
 - [ ] Staff/manager `WorkerProfile` accounts needed for actual restaurant
@@ -78,7 +75,7 @@ locally, or real environment variables in a deployed environment):
 
 ## HTTPS
 
-- [ ] The app is served over HTTPS only. `config/settings.py` does not
+- [ ] The app is served over HTTPS only. `backend/config/settings.py` does not
       currently set any of Django's HTTPS-enforcement settings
       (`SECURE_SSL_REDIRECT`, `SESSION_COOKIE_SECURE`,
       `CSRF_COOKIE_SECURE`, `SECURE_HSTS_SECONDS`, etc.), so HTTPS

@@ -15,14 +15,22 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# Build paths inside the backend project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables from a .env file in the project root, if one
+# Root of the whole repo (parent of backend/ and frontend/).
+REPO_ROOT = BASE_DIR.parent
+
+# Frontend assets (templates, static sources, compiled static output) live
+# in a sibling frontend/ directory so they can be swapped out independently
+# of the Django backend.
+FRONTEND_DIR = REPO_ROOT / 'frontend'
+
+# Load environment variables from a .env file in the repo root, if one
 # exists. In production, environment variables are expected to be supplied
 # by the hosting platform instead of a committed .env file; load_dotenv()
 # is a no-op if no .env file is found, so this is safe everywhere.
-load_dotenv(BASE_DIR / '.env')
+load_dotenv(REPO_ROOT / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -80,7 +88,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],
+        'DIRS': [FRONTEND_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -102,7 +110,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': REPO_ROOT / 'db.sqlite3',
     }
 }
 
@@ -147,10 +155,10 @@ STATIC_URL = 'static/'
 # the source static directory: Tailwind's compiled CSS output
 # (static/css/app.css) lives here, built by the standalone Tailwind CLI -
 # see docs/setup/tailwind.md.
-STATICFILES_DIRS = [BASE_DIR / 'static']
+STATICFILES_DIRS = [FRONTEND_DIR / 'static']
 
 # Where `collectstatic` gathers static files for deployment.
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_ROOT = FRONTEND_DIR / 'staticfiles'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field

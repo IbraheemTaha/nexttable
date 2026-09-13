@@ -37,11 +37,11 @@ class BaseLayoutAndStaticPipelineTests(TestCase):
 
     def test_project_template_dir_is_registered(self):
         dirs = [Path(d) for d in settings.TEMPLATES[0]['DIRS']]
-        self.assertIn(settings.BASE_DIR / 'templates', dirs)
+        self.assertIn(settings.FRONTEND_DIR / 'templates', dirs)
 
     def test_static_source_dir_is_registered(self):
         dirs = [Path(d) for d in settings.STATICFILES_DIRS]
-        self.assertIn(settings.BASE_DIR / 'static', dirs)
+        self.assertIn(settings.FRONTEND_DIR / 'static', dirs)
 
     def test_placeholder_page_renders_with_shared_shell(self):
         client = Client()
