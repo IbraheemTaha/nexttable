@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.contrib import messages
+from django.db.models import Case, IntegerField, Value, When
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -28,9 +29,50 @@ def staff_landing(request):
     return render(request, 'restaurant/staff_landing.html')
 
 
+ACTIVE_WAITLIST_STATUSES = [
+    WaitlistEntry.Status.WAITING,
+    WaitlistEntry.Status.NOTIFIED,
+    WaitlistEntry.Status.ARRIVED,
+    WaitlistEntry.Status.LATE_DEMOTED,
+]
+
+PRIORITY_WAITLIST_STATUSES = [
+    WaitlistEntry.Status.WAITING,
+    WaitlistEntry.Status.LATE_DEMOTED,
+]
+
+
 @staff_or_manager_required
 def waitlist(request):
-    return render(request, 'restaurant/waitlist_placeholder.html')
+    status_filter = request.GET.get('status', 'all')
+
+    if status_filter == 'waiting':
+        statuses = [WaitlistEntry.Status.WAITING]
+    else:
+        status_filter = 'all'
+        statuses = ACTIVE_WAITLIST_STATUSES
+
+    entries = (
+        WaitlistEntry.objects.filter(status__in=statuses)
+        .select_related('assigned_table')
+        .annotate(
+            is_priority=Case(
+                When(status__in=PRIORITY_WAITLIST_STATUSES, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by('is_priority', 'checked_in_at')
+    )
+
+    return render(
+        request,
+        'restaurant/waitlist.html',
+        {
+            'entries': entries,
+            'status_filter': status_filter,
+        },
+    )
 
 
 @staff_or_manager_required

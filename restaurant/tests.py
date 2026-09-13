@@ -1064,6 +1064,13 @@ class WorkerAuthorizationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_waitlist_links_back_to_staff_dashboard(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertContains(response, reverse('restaurant:staff_landing'))
+
     def test_no_role_user_is_denied_waitlist_placeholder(self):
         self.client.force_login(self.no_role_user)
 
@@ -2947,3 +2954,181 @@ class MatchTableAutomaticallyTests(TestCase):
         self.assertIsNone(newer.assigned_table)
         self.assertEqual(late_demoted.status, WaitlistEntry.Status.LATE_DEMOTED)
         self.assertIsNone(late_demoted.assigned_table)
+
+
+class StaffWaitlistViewTests(TestCase):
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.staff_user = user_model.objects.create_user(
+            username='waitlist-staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+        cls.no_role_user = user_model.objects.create_user(
+            username='waitlist-plain',
+            password=cls.password,
+        )
+        cls.table = RestaurantTable.objects.create(
+            identifier='T1',
+            capacity=4,
+        )
+
+    def _create_entry(self, **kwargs):
+        defaults = {
+            'guest_name': 'Guest',
+            'party_size': 2,
+        }
+        defaults.update(kwargs)
+        return WaitlistEntry.objects.create(**defaults)
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_staff_or_manager_required_denies_no_role_user(self):
+        self.client.force_login(self.no_role_user)
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_user_can_view_page(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="waitlist-marker"')
+
+    def test_active_statuses_are_shown_with_expected_fields(self):
+        self.client.force_login(self.staff_user)
+        entry = self._create_entry(
+            guest_name='Alice Waiting',
+            party_size=3,
+            estimated_wait_minutes=25,
+            preference_notes='Window seat please',
+            status=WaitlistEntry.Status.WAITING,
+            assigned_table=self.table,
+        )
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertContains(response, entry.guest_name)
+        self.assertContains(response, '25')
+        self.assertContains(response, 'Window seat please')
+        self.assertContains(response, entry.get_status_display())
+        self.assertContains(response, self.table.identifier)
+
+    def test_inactive_statuses_are_excluded_by_default(self):
+        self.client.force_login(self.staff_user)
+        visible = self._create_entry(
+            guest_name='Visible Guest',
+            status=WaitlistEntry.Status.NOTIFIED,
+        )
+        excluded_statuses = [
+            WaitlistEntry.Status.SEATED,
+            WaitlistEntry.Status.CANCELLED,
+            WaitlistEntry.Status.NO_SHOW,
+            WaitlistEntry.Status.LEFT,
+        ]
+        excluded_entries = [
+            self._create_entry(
+                guest_name=f'Excluded {status}',
+                status=status,
+            )
+            for status in excluded_statuses
+        ]
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertContains(response, visible.guest_name)
+        for excluded_entry in excluded_entries:
+            self.assertNotContains(response, excluded_entry.guest_name)
+
+    def test_all_active_statuses_are_shown(self):
+        self.client.force_login(self.staff_user)
+        active_statuses = [
+            WaitlistEntry.Status.WAITING,
+            WaitlistEntry.Status.NOTIFIED,
+            WaitlistEntry.Status.ARRIVED,
+            WaitlistEntry.Status.LATE_DEMOTED,
+        ]
+        entries = [
+            self._create_entry(guest_name=f'Guest {status}', status=status)
+            for status in active_statuses
+        ]
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        for entry in entries:
+            self.assertContains(response, entry.guest_name)
+
+    def test_waiting_and_late_demoted_are_ordered_first_by_checked_in_at(self):
+        self.client.force_login(self.staff_user)
+        now = timezone.now()
+
+        notified = self._create_entry(
+            guest_name='Notified Early',
+            status=WaitlistEntry.Status.NOTIFIED,
+            checked_in_at=now - timezone.timedelta(minutes=50),
+        )
+        late_demoted = self._create_entry(
+            guest_name='Late Demoted',
+            status=WaitlistEntry.Status.LATE_DEMOTED,
+            checked_in_at=now - timezone.timedelta(minutes=40),
+        )
+        oldest_waiting = self._create_entry(
+            guest_name='Oldest Waiting',
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=now - timezone.timedelta(minutes=30),
+        )
+        newest_waiting = self._create_entry(
+            guest_name='Newest Waiting',
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=now - timezone.timedelta(minutes=10),
+        )
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        ordered_names = [entry.guest_name for entry in response.context['entries']]
+
+        self.assertEqual(
+            ordered_names,
+            [
+                late_demoted.guest_name,
+                oldest_waiting.guest_name,
+                newest_waiting.guest_name,
+                notified.guest_name,
+            ],
+        )
+
+    def test_filter_waiting_only_shows_waiting_entries(self):
+        self.client.force_login(self.staff_user)
+        waiting = self._create_entry(
+            guest_name='Waiting Guest',
+            status=WaitlistEntry.Status.WAITING,
+        )
+        notified = self._create_entry(
+            guest_name='Notified Guest',
+            status=WaitlistEntry.Status.NOTIFIED,
+        )
+
+        response = self.client.get(reverse('restaurant:waitlist'), {'status': 'waiting'})
+
+        self.assertContains(response, waiting.guest_name)
+        self.assertNotContains(response, notified.guest_name)
+
+    def test_page_links_back_to_staff_dashboard(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse('restaurant:waitlist'))
+
+        self.assertContains(response, reverse('restaurant:staff_landing'))

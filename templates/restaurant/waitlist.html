@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}NextTable - Waitlist{% endblock %}
+
+{% block content %}
+<h1 id="waitlist-marker" class="text-2xl font-bold">Waitlist</h1>
+
+<nav id="waitlist-filters" class="mt-4 flex gap-4">
+    <a
+        id="waitlist-filter-all"
+        href="{% url 'restaurant:waitlist' %}"
+        class="{% if status_filter == 'all' %}font-bold underline{% else %}text-blue-600 hover:underline{% endif %}"
+    >
+        All active
+    </a>
+    <a
+        id="waitlist-filter-waiting"
+        href="{% url 'restaurant:waitlist' %}?status=waiting"
+        class="{% if status_filter == 'waiting' %}font-bold underline{% else %}text-blue-600 hover:underline{% endif %}"
+    >
+        Waiting only
+    </a>
+</nav>
+
+<table class="mt-4 w-full text-left">
+    <thead>
+        <tr>
+            <th>Guest</th>
+            <th>Party size</th>
+            <th>Estimated wait (min)</th>
+            <th>Checked in</th>
+            <th>Preference notes</th>
+            <th>Status</th>
+            <th>Table</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in entries %}
+        <tr id="waitlist-entry-{{ entry.pk }}">
+            <td>{{ entry.guest_name }}</td>
+            <td>{{ entry.party_size }}</td>
+            <td>{{ entry.estimated_wait_minutes }}</td>
+            <td>{{ entry.checked_in_at }}</td>
+            <td>{{ entry.preference_notes }}</td>
+            <td>{{ entry.get_status_display }}</td>
+            <td>
+                {% if entry.assigned_table %}
+                    {{ entry.assigned_table.identifier }}
+                {% else %}
+                    &mdash;
+                {% endif %}
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="7">No guests on the waitlist.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<p class="mt-4">
+    <a href="{% url 'restaurant:staff_landing' %}" class="text-blue-600 hover:underline">Back to dashboard</a>
+</p>
+{% endblock %}
