@@ -49,6 +49,7 @@ still runs locally using a clearly-labeled insecure fallback `SECRET_KEY`, so
 | `SECRET_KEY`    | Hardcoded dev-only fallback string                  | Any non-empty string works locally; never reuse the fallback anywhere else. |
 | `DEBUG`         | `True`                                              | String comparison against `'True'`; set to `False` for anything non-local. |
 | `ALLOWED_HOSTS` | empty list                                          | Comma-separated hostnames, e.g. `example.com,www.example.com`. Empty is fine locally with `DEBUG=True`. |
+| `BACKEND_PORT`  | `8000`                                              | Port the Django dev server binds to. Only actually read by `scripts/dev-backend.sh` and by the frontend's Vite proxy (`frontend/vite.config.ts`) - change it here rather than passing a port to `runserver` directly. |
 
 ## 3. Run migrations
 
@@ -93,10 +94,13 @@ uv run backend/manage.py createsuperuser
 ## 6. Start the development server
 
 ```sh
-uv run backend/manage.py runserver
+./scripts/dev-backend.sh
 ```
 
-The app is served at http://127.0.0.1:8000/. Static files (including the
+This reads `BACKEND_PORT` from `.env` (default `8000`) and starts
+`manage.py runserver` on that port - use it instead of calling
+`manage.py runserver` directly so the port stays in sync with the frontend's
+Vite proxy. The app is served at http://127.0.0.1:8000/ by default. Static files (including the
 compiled Tailwind stylesheet at `frontend/static/css/app.css`) are served directly by
 `runserver` in development via `STATICFILES_DIRS`.
 
@@ -135,6 +139,6 @@ cp .env.example .env                 # local env config (optional)
 uv run backend/manage.py migrate             # apply migrations
 uv run backend/manage.py seed_demo_data      # local demo data (staff_demo/manager_demo)
 uv run backend/manage.py createsuperuser     # optional: admin access
-uv run backend/manage.py runserver           # start dev server
+./scripts/dev-backend.sh                     # start dev server (reads BACKEND_PORT)
 uv run pytest                        # run tests
 ```
