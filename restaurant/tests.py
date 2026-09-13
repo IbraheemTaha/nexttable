@@ -1175,6 +1175,10 @@ class WorkerAccountManagementTests(TestCase):
             user=cls.staff_user,
             role=WorkerProfile.Role.STAFF,
         )
+        cls.no_role_user = user_model.objects.create_user(
+            username='plain-worker-mgmt',
+            password=cls.password,
+        )
 
     def test_manager_can_view_worker_account_list(self):
         self.client.force_login(self.manager_user)
@@ -1195,6 +1199,19 @@ class WorkerAccountManagementTests(TestCase):
 
     def test_staff_user_is_denied_worker_account_management_pages(self):
         self.client.force_login(self.staff_user)
+
+        urls = [
+            reverse('restaurant:worker_account_list'),
+            reverse('restaurant:worker_account_create'),
+            reverse('restaurant:worker_account_edit', args=[self.staff_user.pk]),
+        ]
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 403)
+
+    def test_no_role_user_is_denied_worker_account_management_pages(self):
+        self.client.force_login(self.no_role_user)
 
         urls = [
             reverse('restaurant:worker_account_list'),
@@ -1401,6 +1418,10 @@ class TableConfigurationTests(TestCase):
             user=cls.staff_user,
             role=WorkerProfile.Role.STAFF,
         )
+        cls.no_role_user = user_model.objects.create_user(
+            username='plain-table-config',
+            password=cls.password,
+        )
         cls.table = RestaurantTable.objects.create(
             identifier='Window 1',
             capacity=4,
@@ -1436,6 +1457,23 @@ class TableConfigurationTests(TestCase):
 
     def test_staff_user_is_denied_table_config_pages(self):
         self.client.force_login(self.staff_user)
+
+        urls = [
+            reverse('restaurant:table_config_list'),
+            reverse('restaurant:table_config_create'),
+            reverse('restaurant:table_config_edit', args=[self.table.pk]),
+            reverse('restaurant:table_config_remove', args=[self.table.pk]),
+        ]
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 403)
+
+                post_response = self.client.post(url, {})
+                self.assertEqual(post_response.status_code, 403)
+
+    def test_no_role_user_is_denied_table_config_pages(self):
+        self.client.force_login(self.no_role_user)
 
         urls = [
             reverse('restaurant:table_config_list'),
@@ -1687,6 +1725,10 @@ class EtaConfigurationTests(TestCase):
             user=cls.staff_user,
             role=WorkerProfile.Role.STAFF,
         )
+        cls.no_role_user = user_model.objects.create_user(
+            username='eta-plain',
+            password=cls.password,
+        )
 
     def setUp(self):
         EtaRule.objects.all().delete()
@@ -1735,6 +1777,17 @@ class EtaConfigurationTests(TestCase):
 
     def test_staff_user_is_denied_eta_config_pages(self):
         self.client.force_login(self.staff_user)
+
+        for url in self.eta_urls():
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 403)
+
+                post_response = self.client.post(url, {})
+                self.assertEqual(post_response.status_code, 403)
+
+    def test_no_role_user_is_denied_eta_config_pages(self):
+        self.client.force_login(self.no_role_user)
 
         for url in self.eta_urls():
             with self.subTest(url=url):
