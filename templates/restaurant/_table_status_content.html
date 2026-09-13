@@ -1,0 +1,85 @@
+{% if eligible_entries and free_tables %}
+<section id="manual-table-assignment" class="mt-6">
+    <h2 class="text-lg font-semibold">Manually assign a table</h2>
+    <form method="post" action="{% url 'restaurant:manual_table_assignment' %}" class="mt-2 flex gap-2 items-end">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="table_status">
+        <label>
+            Guest
+            <select name="entry_id" id="manual-assign-entry">
+                {% for entry in eligible_entries %}
+                <option value="{{ entry.pk }}">{{ entry.guest_name }} (party of {{ entry.party_size }})</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Table
+            <select name="table_id" id="manual-assign-table">
+                {% for table in free_tables %}
+                <option value="{{ table.pk }}">{{ table.identifier }} (capacity {{ table.capacity }})</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit" id="manual-assign-submit">Assign table</button>
+    </form>
+</section>
+{% endif %}
+
+{% for group in status_groups %}
+<section id="table-status-group-{{ group.status }}" class="mt-6">
+    <h2 class="text-lg font-semibold">{{ group.label }} ({{ group.tables|length }})</h2>
+    {% if group.tables %}
+    <table class="mt-2 w-full text-left">
+        <thead>
+            <tr>
+                <th>Table</th>
+                <th>Capacity</th>
+                <th>Guest</th>
+                <th>Party size</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for table in group.tables %}
+            <tr id="table-status-row-{{ table.pk }}">
+                <td>{{ table.identifier }}</td>
+                <td>{{ table.capacity }}</td>
+                {% if table.current_guest_entry %}
+                <td id="table-status-guest-{{ table.pk }}">{{ table.current_guest_entry.guest_name }}</td>
+                <td id="table-status-party-size-{{ table.pk }}">{{ table.current_guest_entry.party_size }}</td>
+                {% else %}
+                <td>&mdash;</td>
+                <td>&mdash;</td>
+                {% endif %}
+                <td>
+                    {% if table.status == 'free' %}
+                    <form method="post" action="{% url 'restaurant:table_status_action' table.pk 'occupied' %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" id="table-status-action-occupied-{{ table.pk }}">Seat walk-in (Occupied)</button>
+                    </form>
+                    {% elif table.status == 'occupied' %}
+                    <form method="post" action="{% url 'restaurant:table_status_action' table.pk 'cleaning' %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" id="table-status-action-cleaning-{{ table.pk }}">Mark Cleaning</button>
+                    </form>
+                    {% elif table.status == 'cleaning' %}
+                    <form method="post" action="{% url 'restaurant:table_status_action' table.pk 'free' %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" id="table-status-action-free-{{ table.pk }}">Mark Free</button>
+                    </form>
+                    {% elif table.status == 'reserved' %}
+                    <form method="post" action="{% url 'restaurant:table_status_action' table.pk 'free' %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" id="table-status-action-free-{{ table.pk }}">Mark Free</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="mt-2 text-gray-600">No tables with this status.</p>
+    {% endif %}
+</section>
+{% endfor %}

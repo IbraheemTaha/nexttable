@@ -33,6 +33,11 @@ urlpatterns = [
     path('staff/', views.staff_landing, name='staff_landing'),
     path('staff/waitlist/', views.waitlist, name='waitlist'),
     path(
+        'staff/waitlist/partial/',
+        views.waitlist_partial,
+        name='waitlist_partial',
+    ),
+    path(
         'staff/waitlist/<int:entry_id>/<str:action>/',
         views.waitlist_entry_action,
         name='waitlist_entry_action',
@@ -43,6 +48,11 @@ urlpatterns = [
         name='manual_table_assignment',
     ),
     path('staff/tables/', views.table_status, name='table_status'),
+    path(
+        'staff/tables/partial/',
+        views.table_status_partial,
+        name='table_status_partial',
+    ),
     path(
         'staff/tables/<int:table_id>/<str:target_status>/',
         views.table_status_action,

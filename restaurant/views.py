@@ -27,6 +27,7 @@ from .services import (
     InvalidStatusTransitionError,
     ManualAssignmentError,
     assign_table_manually,
+    demote_late_guests,
     mark_guest_arrived,
     mark_guest_cancelled,
     mark_guest_left,
@@ -54,8 +55,7 @@ PRIORITY_WAITLIST_STATUSES = [
 ]
 
 
-@staff_or_manager_required
-def waitlist(request):
+def _waitlist_context(request):
     status_filter = request.GET.get('status', 'all')
 
     if status_filter == 'waiting':
@@ -85,15 +85,24 @@ def waitlist(request):
         entry for entry in entries if entry.status in PRIORITY_WAITLIST_STATUSES
     ]
 
+    return {
+        'entries': entries,
+        'status_filter': status_filter,
+        'free_tables': free_tables,
+        'eligible_entries': eligible_entries,
+    }
+
+
+@staff_or_manager_required
+def waitlist(request):
+    return render(request, 'restaurant/waitlist.html', _waitlist_context(request))
+
+
+@staff_or_manager_required
+def waitlist_partial(request):
+    demote_late_guests()
     return render(
-        request,
-        'restaurant/waitlist.html',
-        {
-            'entries': entries,
-            'status_filter': status_filter,
-            'free_tables': free_tables,
-            'eligible_entries': eligible_entries,
-        },
+        request, 'restaurant/_waitlist_content.html', _waitlist_context(request)
     )
 
 
@@ -146,8 +155,7 @@ TABLE_GUEST_WAITLIST_STATUSES = [
 ]
 
 
-@staff_or_manager_required
-def table_status(request):
+def _table_status_context():
     guest_entries_by_table_id = {
         entry.assigned_table_id: entry
         for entry in WaitlistEntry.objects.filter(
@@ -182,14 +190,24 @@ def table_status(request):
     )
     free_tables = tables_by_status.get(RestaurantTable.Status.FREE, [])
 
+    return {
+        'status_groups': status_groups,
+        'eligible_entries': eligible_entries,
+        'free_tables': free_tables,
+    }
+
+
+@staff_or_manager_required
+def table_status(request):
     return render(
-        request,
-        'restaurant/table_status.html',
-        {
-            'status_groups': status_groups,
-            'eligible_entries': eligible_entries,
-            'free_tables': free_tables,
-        },
+        request, 'restaurant/table_status.html', _table_status_context()
+    )
+
+
+@staff_or_manager_required
+def table_status_partial(request):
+    return render(
+        request, 'restaurant/_table_status_content.html', _table_status_context()
     )
 
 

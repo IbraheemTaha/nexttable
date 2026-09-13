@@ -3282,6 +3282,169 @@ class StaffTableStatusViewTests(TestCase):
         self.assertContains(response, reverse('restaurant:staff_landing'))
 
 
+class WaitlistPartialViewTests(TestCase):
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.staff_user = user_model.objects.create_user(
+            username='waitlist-partial-staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+        cls.no_role_user = user_model.objects.create_user(
+            username='waitlist-partial-plain',
+            password=cls.password,
+        )
+
+    def _create_entry(self, **kwargs):
+        defaults = {
+            'guest_name': 'Guest',
+            'party_size': 2,
+        }
+        defaults.update(kwargs)
+        return WaitlistEntry.objects.create(**defaults)
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        response = self.client.get(reverse('restaurant:waitlist_partial'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_staff_or_manager_required_denies_no_role_user(self):
+        self.client.force_login(self.no_role_user)
+
+        response = self.client.get(reverse('restaurant:waitlist_partial'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_partial_renders_entries_without_full_page_chrome(self):
+        self.client.force_login(self.staff_user)
+        entry = self._create_entry(
+            guest_name='Partial Guest',
+            status=WaitlistEntry.Status.WAITING,
+        )
+
+        response = self.client.get(reverse('restaurant:waitlist_partial'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, entry.guest_name)
+        self.assertNotContains(response, 'id="waitlist-marker"')
+
+    def test_partial_respects_waiting_only_filter(self):
+        self.client.force_login(self.staff_user)
+        waiting = self._create_entry(
+            guest_name='Partial Waiting',
+            status=WaitlistEntry.Status.WAITING,
+        )
+        notified = self._create_entry(
+            guest_name='Partial Notified',
+            status=WaitlistEntry.Status.NOTIFIED,
+        )
+
+        response = self.client.get(
+            reverse('restaurant:waitlist_partial'), {'status': 'waiting'}
+        )
+
+        self.assertContains(response, waiting.guest_name)
+        self.assertNotContains(response, notified.guest_name)
+
+    def test_action_buttons_present_in_partial_response(self):
+        self.client.force_login(self.staff_user)
+        entry = self._create_entry(
+            guest_name='Actionable Guest',
+            status=WaitlistEntry.Status.WAITING,
+        )
+
+        response = self.client.get(reverse('restaurant:waitlist_partial'))
+
+        self.assertContains(
+            response, f'id="waitlist-action-arrived-{entry.pk}"'
+        )
+        self.assertContains(
+            response, f'id="waitlist-action-cancelled-{entry.pk}"'
+        )
+
+    def test_refreshing_partial_demotes_late_guests(self):
+        self.client.force_login(self.staff_user)
+        late_entry = self._create_entry(
+            guest_name='Late Guest',
+            status=WaitlistEntry.Status.NOTIFIED,
+            notified_at=timezone.now() - timezone.timedelta(minutes=999),
+        )
+
+        response = self.client.get(reverse('restaurant:waitlist_partial'))
+
+        self.assertEqual(response.status_code, 200)
+        late_entry.refresh_from_db()
+        self.assertEqual(late_entry.status, WaitlistEntry.Status.LATE_DEMOTED)
+
+
+class TableStatusPartialViewTests(TestCase):
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.staff_user = user_model.objects.create_user(
+            username='table-status-partial-staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+        cls.no_role_user = user_model.objects.create_user(
+            username='table-status-partial-plain',
+            password=cls.password,
+        )
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        response = self.client.get(reverse('restaurant:table_status_partial'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_staff_or_manager_required_denies_no_role_user(self):
+        self.client.force_login(self.no_role_user)
+
+        response = self.client.get(reverse('restaurant:table_status_partial'))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_partial_renders_tables_without_full_page_chrome(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='TP1',
+            capacity=2,
+            status=RestaurantTable.Status.FREE,
+        )
+
+        response = self.client.get(reverse('restaurant:table_status_partial'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, table.identifier)
+        self.assertNotContains(response, 'id="table-status-marker"')
+
+    def test_action_buttons_present_in_partial_response(self):
+        self.client.force_login(self.staff_user)
+        table = RestaurantTable.objects.create(
+            identifier='TP2',
+            capacity=2,
+            status=RestaurantTable.Status.FREE,
+        )
+
+        response = self.client.get(reverse('restaurant:table_status_partial'))
+
+        self.assertContains(
+            response, f'id="table-status-action-occupied-{table.pk}"'
+        )
+
+
 class GuestStatusTransitionServiceTests(TestCase):
     """Tests for the guest status transition service functions."""
 
@@ -4322,3 +4485,4 @@ class DemoteLateGuestsServiceTests(TestCase):
         self.assertEqual(len(first_run), 1)
         self.assertEqual(second_run, [])
         self.assertEqual(entry.status, WaitlistEntry.Status.LATE_DEMOTED)
+
