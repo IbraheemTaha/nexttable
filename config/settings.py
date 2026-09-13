@@ -79,7 +79,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -142,9 +142,11 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-# Additional locations to look for static files during development (none
-# yet - the Tailwind/htmx asset pipeline is added in a later task).
-STATICFILES_DIRS = []
+# Additional locations to look for static files during development. This is
+# the source static directory: Tailwind's compiled CSS output
+# (static/css/app.css) lives here, built by the standalone Tailwind CLI -
+# see docs/setup/tailwind.md.
+STATICFILES_DIRS = [BASE_DIR / 'static']
 
 # Where `collectstatic` gathers static files for deployment.
 STATIC_ROOT = BASE_DIR / 'staticfiles'

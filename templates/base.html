@@ -1,0 +1,18 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}NextTable{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-900">
+    {% block body %}
+    <main class="mx-auto max-w-3xl p-4">
+        {% block content %}{% endblock %}
+    </main>
+    {% endblock %}
+</body>
+</html>

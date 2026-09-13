@@ -1,0 +1,17 @@
+@import "tailwindcss";
+@config "../../tailwind.config.js";
+
+/*
+ * Tailwind CSS v4 source entry file, compiled by the Tailwind standalone CLI
+ * (no npm/Node) into static/css/app.css, which templates/base.html links
+ * via {% static %}.
+ *
+ * The @config directive above points Tailwind at tailwind.config.js at the
+ * repo root, which scopes class scanning to templates/**\/*.html.
+ *
+ * Build command (run from the repo root):
+ *
+ *   ./bin/tailwindcss -i ./static/src/input.css -o ./static/css/app.css --minify
+ *
+ * See docs/setup/tailwind.md for how to download the CLI binary.
+ */
