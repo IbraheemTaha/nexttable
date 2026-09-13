@@ -5,6 +5,14 @@
 {% block content %}
 <h1 id="waitlist-marker" class="text-2xl font-bold">Waitlist</h1>
 
+{% if messages %}
+<ul id="waitlist-messages" class="mt-4">
+    {% for message in messages %}
+    <li class="{% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+
 <nav id="waitlist-filters" class="mt-4 flex gap-4">
     <a
         id="waitlist-filter-all"
@@ -32,6 +40,7 @@
             <th>Preference notes</th>
             <th>Status</th>
             <th>Table</th>
+            <th>Actions</th>
         </tr>
     </thead>
     <tbody>
@@ -50,10 +59,40 @@
                     &mdash;
                 {% endif %}
             </td>
+            <td class="flex gap-2">
+                {% if entry.status == 'waiting' or entry.status == 'notified' or entry.status == 'late_demoted' %}
+                <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'arrived' %}">
+                    {% csrf_token %}
+                    <button type="submit" id="waitlist-action-arrived-{{ entry.pk }}">Mark arrived</button>
+                </form>
+                {% endif %}
+                {% if entry.status == 'arrived' or entry.status == 'notified' %}
+                <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'seated' %}">
+                    {% csrf_token %}
+                    <button type="submit" id="waitlist-action-seated-{{ entry.pk }}">Mark seated</button>
+                </form>
+                {% endif %}
+                {% if entry.status == 'seated' %}
+                <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'left' %}">
+                    {% csrf_token %}
+                    <button type="submit" id="waitlist-action-left-{{ entry.pk }}">Mark left</button>
+                </form>
+                {% endif %}
+                {% if entry.status == 'waiting' or entry.status == 'notified' or entry.status == 'arrived' or entry.status == 'late_demoted' %}
+                <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'cancelled' %}">
+                    {% csrf_token %}
+                    <button type="submit" id="waitlist-action-cancelled-{{ entry.pk }}">Cancel</button>
+                </form>
+                <form method="post" action="{% url 'restaurant:waitlist_entry_action' entry.pk 'no_show' %}">
+                    {% csrf_token %}
+                    <button type="submit" id="waitlist-action-no-show-{{ entry.pk }}">No-show</button>
+                </form>
+                {% endif %}
+            </td>
         </tr>
         {% empty %}
         <tr>
-            <td colspan="7">No guests on the waitlist.</td>
+            <td colspan="8">No guests on the waitlist.</td>
         </tr>
         {% endfor %}
     </tbody>

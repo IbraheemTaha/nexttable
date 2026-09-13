@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib import messages
 from django.db.models import Case, IntegerField, Value, When
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -21,6 +22,14 @@ from .models import (
     RestaurantTable,
     WaitlistEntry,
     WorkerProfile,
+)
+from .services import (
+    InvalidStatusTransitionError,
+    mark_guest_arrived,
+    mark_guest_cancelled,
+    mark_guest_left,
+    mark_guest_no_show,
+    mark_guest_seated,
 )
 
 
@@ -73,6 +82,32 @@ def waitlist(request):
             'status_filter': status_filter,
         },
     )
+
+
+WAITLIST_ACTIONS = {
+    'arrived': mark_guest_arrived,
+    'seated': mark_guest_seated,
+    'left': mark_guest_left,
+    'cancelled': mark_guest_cancelled,
+    'no_show': mark_guest_no_show,
+}
+
+
+@staff_or_manager_required
+def waitlist_entry_action(request, entry_id, action):
+    entry = get_object_or_404(WaitlistEntry, pk=entry_id)
+
+    transition_fn = WAITLIST_ACTIONS.get(action)
+    if transition_fn is None:
+        raise Http404('Unknown waitlist action.')
+
+    if request.method == 'POST':
+        try:
+            transition_fn(entry)
+        except InvalidStatusTransitionError as exc:
+            messages.error(request, str(exc))
+
+    return redirect('restaurant:waitlist')
 
 
 @staff_or_manager_required

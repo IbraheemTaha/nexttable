@@ -162,6 +162,235 @@ def match_table_automatically(table):
     return matched_entry
 
 
+class InvalidStatusTransitionError(ValidationError):
+    """Raised when a requested WaitlistEntry status transition is not allowed."""
+
+
+# Maps each transition target status to the set of statuses it may be
+# entered from. Any status not listed as a key here has no valid inbound
+# transitions via the guest status action service functions.
+_ALLOWED_TRANSITIONS = {
+    WaitlistEntry.Status.ARRIVED: {
+        WaitlistEntry.Status.WAITING,
+        WaitlistEntry.Status.NOTIFIED,
+        WaitlistEntry.Status.LATE_DEMOTED,
+    },
+    WaitlistEntry.Status.SEATED: {
+        WaitlistEntry.Status.ARRIVED,
+        WaitlistEntry.Status.NOTIFIED,
+    },
+    WaitlistEntry.Status.LEFT: {
+        WaitlistEntry.Status.SEATED,
+    },
+    WaitlistEntry.Status.CANCELLED: {
+        WaitlistEntry.Status.WAITING,
+        WaitlistEntry.Status.NOTIFIED,
+        WaitlistEntry.Status.ARRIVED,
+        WaitlistEntry.Status.LATE_DEMOTED,
+    },
+    WaitlistEntry.Status.NO_SHOW: {
+        WaitlistEntry.Status.WAITING,
+        WaitlistEntry.Status.NOTIFIED,
+        WaitlistEntry.Status.ARRIVED,
+        WaitlistEntry.Status.LATE_DEMOTED,
+    },
+}
+
+# Timestamp field to stamp with the current time for each target status.
+_TRANSITION_TIMESTAMP_FIELD = {
+    WaitlistEntry.Status.ARRIVED: 'arrived_at',
+    WaitlistEntry.Status.SEATED: 'seated_at',
+    WaitlistEntry.Status.LEFT: 'left_at',
+    WaitlistEntry.Status.CANCELLED: 'cancelled_at',
+    WaitlistEntry.Status.NO_SHOW: 'no_show_at',
+}
+
+
+def _validate_transition(waitlist_entry, target_status):
+    if not isinstance(waitlist_entry, WaitlistEntry):
+        raise TypeError('waitlist_entry must be a WaitlistEntry instance')
+
+    allowed_from = _ALLOWED_TRANSITIONS.get(target_status, set())
+    if waitlist_entry.status not in allowed_from:
+        raise InvalidStatusTransitionError(
+            f'Cannot transition a WaitlistEntry from '
+            f'"{waitlist_entry.status}" to "{target_status}".'
+        )
+
+
+def mark_guest_arrived(waitlist_entry):
+    """Transition a WaitlistEntry to arrived, stamping arrived_at.
+
+    Valid from: waiting, notified, late_demoted.
+
+    Args:
+        waitlist_entry: WaitlistEntry instance to transition.
+
+    Returns:
+        The updated WaitlistEntry instance.
+
+    Raises:
+        TypeError: If waitlist_entry is not a WaitlistEntry instance.
+        InvalidStatusTransitionError: If the current status cannot
+            transition to arrived.
+    """
+    _validate_transition(waitlist_entry, WaitlistEntry.Status.ARRIVED)
+
+    with transaction.atomic():
+        waitlist_entry.status = WaitlistEntry.Status.ARRIVED
+        waitlist_entry.arrived_at = timezone.now()
+        waitlist_entry.save(
+            update_fields=['status', 'arrived_at', 'updated_at']
+        )
+
+    return waitlist_entry
+
+
+def mark_guest_seated(waitlist_entry):
+    """Transition a WaitlistEntry to seated, stamping seated_at.
+
+    Requires the entry to have an assigned_table; that table's status is
+    set to occupied.
+
+    Valid from: arrived, notified.
+
+    Args:
+        waitlist_entry: WaitlistEntry instance to transition.
+
+    Returns:
+        The updated WaitlistEntry instance.
+
+    Raises:
+        TypeError: If waitlist_entry is not a WaitlistEntry instance.
+        InvalidStatusTransitionError: If the current status cannot
+            transition to seated, or if there is no assigned_table.
+    """
+    _validate_transition(waitlist_entry, WaitlistEntry.Status.SEATED)
+
+    if waitlist_entry.assigned_table_id is None:
+        raise InvalidStatusTransitionError(
+            'Cannot mark a guest seated without an assigned table.'
+        )
+
+    with transaction.atomic():
+        waitlist_entry.status = WaitlistEntry.Status.SEATED
+        waitlist_entry.seated_at = timezone.now()
+        waitlist_entry.save(
+            update_fields=['status', 'seated_at', 'updated_at']
+        )
+
+        table = waitlist_entry.assigned_table
+        table.status = RestaurantTable.Status.OCCUPIED
+        table.save(update_fields=['status', 'updated_at'])
+
+    return waitlist_entry
+
+
+def mark_guest_left(waitlist_entry):
+    """Transition a seated WaitlistEntry to left, stamping left_at.
+
+    Sets the assigned table's status to cleaning. The entry's
+    assigned_table and history are left intact for record-keeping.
+
+    Valid from: seated.
+
+    Args:
+        waitlist_entry: WaitlistEntry instance to transition.
+
+    Returns:
+        The updated WaitlistEntry instance.
+
+    Raises:
+        TypeError: If waitlist_entry is not a WaitlistEntry instance.
+        InvalidStatusTransitionError: If the current status is not seated.
+    """
+    _validate_transition(waitlist_entry, WaitlistEntry.Status.LEFT)
+
+    with transaction.atomic():
+        waitlist_entry.status = WaitlistEntry.Status.LEFT
+        waitlist_entry.left_at = timezone.now()
+        waitlist_entry.save(
+            update_fields=['status', 'left_at', 'updated_at']
+        )
+
+        table = waitlist_entry.assigned_table
+        if table is not None:
+            table.status = RestaurantTable.Status.CLEANING
+            table.save(update_fields=['status', 'updated_at'])
+
+    return waitlist_entry
+
+
+def mark_guest_cancelled(waitlist_entry):
+    """Transition a WaitlistEntry to cancelled, stamping cancelled_at.
+
+    Does not require an assigned table. If a table was already assigned,
+    it is freed (status set to free) since the guest will not occupy it.
+
+    Valid from: waiting, notified, arrived, late_demoted.
+
+    Args:
+        waitlist_entry: WaitlistEntry instance to transition.
+
+    Returns:
+        The updated WaitlistEntry instance.
+
+    Raises:
+        TypeError: If waitlist_entry is not a WaitlistEntry instance.
+        InvalidStatusTransitionError: If the current status cannot
+            transition to cancelled.
+    """
+    return _mark_guest_not_occupying(
+        waitlist_entry,
+        target_status=WaitlistEntry.Status.CANCELLED,
+        timestamp_field='cancelled_at',
+    )
+
+
+def mark_guest_no_show(waitlist_entry):
+    """Transition a WaitlistEntry to no_show, stamping no_show_at.
+
+    Does not require an assigned table. If a table was already assigned,
+    it is freed (status set to free) since the guest will not occupy it.
+
+    Valid from: waiting, notified, arrived, late_demoted.
+
+    Args:
+        waitlist_entry: WaitlistEntry instance to transition.
+
+    Returns:
+        The updated WaitlistEntry instance.
+
+    Raises:
+        TypeError: If waitlist_entry is not a WaitlistEntry instance.
+        InvalidStatusTransitionError: If the current status cannot
+            transition to no_show.
+    """
+    return _mark_guest_not_occupying(
+        waitlist_entry,
+        target_status=WaitlistEntry.Status.NO_SHOW,
+        timestamp_field='no_show_at',
+    )
+
+
+def _mark_guest_not_occupying(waitlist_entry, target_status, timestamp_field):
+    _validate_transition(waitlist_entry, target_status)
+
+    with transaction.atomic():
+        waitlist_entry.status = target_status
+        setattr(waitlist_entry, timestamp_field, timezone.now())
+        waitlist_entry.save(
+            update_fields=['status', timestamp_field, 'updated_at']
+        )
+
+        table = waitlist_entry.assigned_table
+        if table is not None:
+            table.status = RestaurantTable.Status.FREE
+            table.save(update_fields=['status', 'updated_at'])
+
+    return waitlist_entry
+
+
 def _guest_needs_accessibility(waitlist_entry):
     """Check if guest has accessibility requirements.
 

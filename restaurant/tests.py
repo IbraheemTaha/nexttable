@@ -24,8 +24,14 @@ from .models import (
     WorkerProfile,
 )
 from .services import (
+    InvalidStatusTransitionError,
     calculate_estimated_wait_minutes,
     check_table_compatibility,
+    mark_guest_arrived,
+    mark_guest_cancelled,
+    mark_guest_left,
+    mark_guest_no_show,
+    mark_guest_seated,
     match_table_automatically,
     select_next_guest_for_table,
 )
@@ -3132,3 +3138,384 @@ class StaffWaitlistViewTests(TestCase):
         response = self.client.get(reverse('restaurant:waitlist'))
 
         self.assertContains(response, reverse('restaurant:staff_landing'))
+
+
+class GuestStatusTransitionServiceTests(TestCase):
+    """Tests for the guest status transition service functions."""
+
+    def setUp(self):
+        self.table = RestaurantTable.objects.create(
+            identifier='T-Status',
+            capacity=4,
+            status=RestaurantTable.Status.RESERVED,
+        )
+
+    def _make_entry(self, status, assigned_table=None, **kwargs):
+        defaults = {
+            'guest_name': 'Guest',
+            'party_size': 2,
+            'status': status,
+            'assigned_table': assigned_table,
+        }
+        defaults.update(kwargs)
+        return WaitlistEntry.objects.create(**defaults)
+
+    # -- mark_guest_arrived --
+
+    def test_mark_guest_arrived_from_waiting_sets_status_and_timestamp(self):
+        entry = self._make_entry(WaitlistEntry.Status.WAITING)
+
+        result = mark_guest_arrived(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(result, entry)
+        self.assertEqual(entry.status, WaitlistEntry.Status.ARRIVED)
+        self.assertIsNotNone(entry.arrived_at)
+
+    def test_mark_guest_arrived_from_notified_succeeds(self):
+        entry = self._make_entry(WaitlistEntry.Status.NOTIFIED)
+
+        mark_guest_arrived(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.ARRIVED)
+
+    def test_mark_guest_arrived_from_late_demoted_succeeds(self):
+        entry = self._make_entry(WaitlistEntry.Status.LATE_DEMOTED)
+
+        mark_guest_arrived(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.ARRIVED)
+
+    def test_mark_guest_arrived_from_seated_is_rejected(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.SEATED, assigned_table=self.table
+        )
+
+        with self.assertRaises(InvalidStatusTransitionError):
+            mark_guest_arrived(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.SEATED)
+        self.assertIsNone(entry.arrived_at)
+
+    # -- mark_guest_seated --
+
+    def test_mark_guest_seated_requires_assigned_table(self):
+        entry = self._make_entry(WaitlistEntry.Status.ARRIVED, assigned_table=None)
+
+        with self.assertRaises(InvalidStatusTransitionError):
+            mark_guest_seated(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.ARRIVED)
+        self.assertIsNone(entry.seated_at)
+
+    def test_mark_guest_seated_sets_status_timestamp_and_occupies_table(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.ARRIVED, assigned_table=self.table
+        )
+
+        result = mark_guest_seated(entry)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(result, entry)
+        self.assertEqual(entry.status, WaitlistEntry.Status.SEATED)
+        self.assertIsNotNone(entry.seated_at)
+        self.assertEqual(self.table.status, RestaurantTable.Status.OCCUPIED)
+
+    def test_mark_guest_seated_from_notified_succeeds(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED, assigned_table=self.table
+        )
+
+        mark_guest_seated(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.SEATED)
+
+    def test_mark_guest_seated_from_waiting_is_rejected(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.WAITING, assigned_table=self.table
+        )
+
+        with self.assertRaises(InvalidStatusTransitionError):
+            mark_guest_seated(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+
+    # -- mark_guest_left --
+
+    def test_mark_guest_left_from_seated_sets_status_timestamp_and_cleans_table(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.SEATED, assigned_table=self.table
+        )
+        self.table.status = RestaurantTable.Status.OCCUPIED
+        self.table.save(update_fields=['status'])
+
+        result = mark_guest_left(entry)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(result, entry)
+        self.assertEqual(entry.status, WaitlistEntry.Status.LEFT)
+        self.assertIsNotNone(entry.left_at)
+        self.assertEqual(self.table.status, RestaurantTable.Status.CLEANING)
+        # assigned_table and history are preserved for record-keeping.
+        self.assertEqual(entry.assigned_table, self.table)
+
+    def test_mark_guest_left_from_waiting_is_rejected(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.WAITING, assigned_table=self.table
+        )
+
+        with self.assertRaises(InvalidStatusTransitionError):
+            mark_guest_left(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+
+    def test_mark_guest_left_from_arrived_is_rejected(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.ARRIVED, assigned_table=self.table
+        )
+
+        with self.assertRaises(InvalidStatusTransitionError):
+            mark_guest_left(entry)
+
+    # -- mark_guest_cancelled --
+
+    def test_mark_guest_cancelled_without_table_does_not_touch_any_table(self):
+        entry = self._make_entry(WaitlistEntry.Status.WAITING, assigned_table=None)
+        self.table.status = RestaurantTable.Status.RESERVED
+        self.table.save(update_fields=['status'])
+
+        result = mark_guest_cancelled(entry)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(result, entry)
+        self.assertEqual(entry.status, WaitlistEntry.Status.CANCELLED)
+        self.assertIsNotNone(entry.cancelled_at)
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+
+    def test_mark_guest_cancelled_with_assigned_table_frees_it(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED, assigned_table=self.table
+        )
+        self.table.status = RestaurantTable.Status.RESERVED
+        self.table.save(update_fields=['status'])
+
+        mark_guest_cancelled(entry)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.CANCELLED)
+        self.assertEqual(self.table.status, RestaurantTable.Status.FREE)
+
+    def test_mark_guest_cancelled_from_seated_is_rejected(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.SEATED, assigned_table=self.table
+        )
+
+        with self.assertRaises(InvalidStatusTransitionError):
+            mark_guest_cancelled(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.SEATED)
+
+    def test_mark_guest_cancelled_from_arrived_succeeds(self):
+        entry = self._make_entry(WaitlistEntry.Status.ARRIVED, assigned_table=None)
+
+        mark_guest_cancelled(entry)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.CANCELLED)
+
+    # -- mark_guest_no_show --
+
+    def test_mark_guest_no_show_without_table_does_not_touch_any_table(self):
+        entry = self._make_entry(WaitlistEntry.Status.WAITING, assigned_table=None)
+        self.table.status = RestaurantTable.Status.RESERVED
+        self.table.save(update_fields=['status'])
+
+        result = mark_guest_no_show(entry)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(result, entry)
+        self.assertEqual(entry.status, WaitlistEntry.Status.NO_SHOW)
+        self.assertIsNotNone(entry.no_show_at)
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+
+    def test_mark_guest_no_show_with_assigned_table_frees_it(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.NOTIFIED, assigned_table=self.table
+        )
+        self.table.status = RestaurantTable.Status.RESERVED
+        self.table.save(update_fields=['status'])
+
+        mark_guest_no_show(entry)
+
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.NO_SHOW)
+        self.assertEqual(self.table.status, RestaurantTable.Status.FREE)
+
+    def test_mark_guest_no_show_from_seated_is_rejected(self):
+        entry = self._make_entry(
+            WaitlistEntry.Status.SEATED, assigned_table=self.table
+        )
+
+        with self.assertRaises(InvalidStatusTransitionError):
+            mark_guest_no_show(entry)
+
+    def test_transition_functions_reject_non_waitlist_entry_argument(self):
+        with self.assertRaises(TypeError):
+            mark_guest_arrived('not an entry')
+        with self.assertRaises(TypeError):
+            mark_guest_seated('not an entry')
+        with self.assertRaises(TypeError):
+            mark_guest_left('not an entry')
+        with self.assertRaises(TypeError):
+            mark_guest_cancelled('not an entry')
+        with self.assertRaises(TypeError):
+            mark_guest_no_show('not an entry')
+
+
+class WaitlistEntryActionViewTests(TestCase):
+    """Tests for the staff waitlist entry status action view."""
+
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.staff_user = user_model.objects.create_user(
+            username='action-staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+        cls.no_role_user = user_model.objects.create_user(
+            username='action-plain',
+            password=cls.password,
+        )
+
+    def setUp(self):
+        self.table = RestaurantTable.objects.create(
+            identifier='T-Action',
+            capacity=4,
+            status=RestaurantTable.Status.RESERVED,
+        )
+
+    def _action_url(self, entry, action):
+        return reverse(
+            'restaurant:waitlist_entry_action', args=[entry.pk, action]
+        )
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        entry = WaitlistEntry.objects.create(
+            guest_name='Guest', party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+        )
+
+        response = self.client.post(self._action_url(entry, 'arrived'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+
+    def test_no_role_user_is_denied(self):
+        self.client.force_login(self.no_role_user)
+        entry = WaitlistEntry.objects.create(
+            guest_name='Guest', party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+        )
+
+        response = self.client.post(self._action_url(entry, 'arrived'))
+
+        self.assertEqual(response.status_code, 403)
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)
+
+    def test_staff_user_can_mark_guest_arrived(self):
+        self.client.force_login(self.staff_user)
+        entry = WaitlistEntry.objects.create(
+            guest_name='Guest', party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+        )
+
+        response = self.client.post(self._action_url(entry, 'arrived'))
+
+        self.assertRedirects(response, reverse('restaurant:waitlist'))
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.ARRIVED)
+        self.assertIsNotNone(entry.arrived_at)
+
+    def test_staff_user_can_mark_guest_seated_with_assigned_table(self):
+        self.client.force_login(self.staff_user)
+        entry = WaitlistEntry.objects.create(
+            guest_name='Guest', party_size=2,
+            status=WaitlistEntry.Status.ARRIVED,
+            assigned_table=self.table,
+        )
+
+        response = self.client.post(self._action_url(entry, 'seated'))
+
+        self.assertRedirects(response, reverse('restaurant:waitlist'))
+        entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.SEATED)
+        self.assertEqual(self.table.status, RestaurantTable.Status.OCCUPIED)
+
+    def test_invalid_transition_shows_error_and_does_not_change_state(self):
+        self.client.force_login(self.staff_user)
+        entry = WaitlistEntry.objects.create(
+            guest_name='Guest', party_size=2,
+            status=WaitlistEntry.Status.SEATED,
+            assigned_table=self.table,
+        )
+
+        response = self.client.post(
+            self._action_url(entry, 'arrived'), follow=True
+        )
+
+        self.assertEqual(response.status_code, 200)
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.SEATED)
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any(
+            'Cannot transition' in str(message) for message in messages_list
+        ))
+
+    def test_unknown_action_returns_404(self):
+        self.client.force_login(self.staff_user)
+        entry = WaitlistEntry.objects.create(
+            guest_name='Guest', party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+        )
+
+        response = self.client.post(self._action_url(entry, 'bogus'))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_request_does_not_mutate_state(self):
+        self.client.force_login(self.staff_user)
+        entry = WaitlistEntry.objects.create(
+            guest_name='Guest', party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+        )
+
+        self.client.get(self._action_url(entry, 'arrived'))
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, WaitlistEntry.Status.WAITING)

@@ -32,6 +32,11 @@ urlpatterns = [
     ),
     path('staff/', views.staff_landing, name='staff_landing'),
     path('staff/waitlist/', views.waitlist, name='waitlist'),
+    path(
+        'staff/waitlist/<int:entry_id>/<str:action>/',
+        views.waitlist_entry_action,
+        name='waitlist_entry_action',
+    ),
     path('staff/tables/', views.table_status, name='table_status'),
     path('manager/', views.manager_landing, name='manager_landing'),
     path(
