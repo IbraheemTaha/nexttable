@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import RestaurantSettings, WorkerProfile
+from .models import RestaurantSettings, RestaurantTable, WorkerProfile
 
 
 @admin.register(RestaurantSettings)
@@ -34,4 +34,12 @@ class WorkerProfileAdmin(admin.ModelAdmin):
         'user__first_name',
         'user__last_name',
     )
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(RestaurantTable)
+class RestaurantTableAdmin(admin.ModelAdmin):
+    list_display = ('identifier', 'capacity', 'status', 'updated_at')
+    list_filter = ('status', 'capacity')
+    search_fields = ('identifier',)
     readonly_fields = ('created_at', 'updated_at')

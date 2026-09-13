@@ -1,9 +1,16 @@
 from django.test import TestCase
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.urls import reverse
 
 from .auth import user_is_manager, user_is_staff_or_manager
-from .models import SINGLETON_PK, RestaurantSettings, WorkerProfile
+from .models import (
+    SINGLETON_PK,
+    RestaurantSettings,
+    RestaurantTable,
+    WorkerProfile,
+)
 
 
 class RestaurantSettingsGetActiveTests(TestCase):
@@ -66,6 +73,61 @@ class RestaurantSettingsGetActiveTests(TestCase):
         self.assertEqual(refreshed.pk, SINGLETON_PK)
         self.assertEqual(refreshed.name, 'Second Attempt')
         self.assertEqual(refreshed.created_at, original_created_at)
+
+
+class RestaurantTableModelTests(TestCase):
+    def test_can_create_valid_table(self):
+        table = RestaurantTable.objects.create(
+            identifier='Table 1',
+            capacity=4,
+            status=RestaurantTable.Status.OCCUPIED,
+        )
+
+        self.assertEqual(table.identifier, 'Table 1')
+        self.assertEqual(table.capacity, 4)
+        self.assertEqual(table.status, RestaurantTable.Status.OCCUPIED)
+        self.assertIsNotNone(table.created_at)
+        self.assertIsNotNone(table.updated_at)
+        self.assertEqual(str(table), 'Table 1 (4)')
+
+    def test_new_table_defaults_to_free_status(self):
+        table = RestaurantTable.objects.create(identifier='Patio 2', capacity=2)
+
+        self.assertEqual(table.status, RestaurantTable.Status.FREE)
+
+    def test_rejects_non_positive_capacity(self):
+        invalid_capacities = [0, -1]
+
+        for capacity in invalid_capacities:
+            with self.subTest(capacity=capacity):
+                table = RestaurantTable(identifier='Counter', capacity=capacity)
+                with self.assertRaises(ValidationError) as context:
+                    table.full_clean()
+
+                self.assertIn('capacity', context.exception.message_dict)
+
+    def test_rejects_invalid_status(self):
+        table = RestaurantTable(
+            identifier='Window 1',
+            capacity=2,
+            status='maintenance',
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            table.full_clean()
+
+        self.assertIn('status', context.exception.message_dict)
+
+    def test_prevents_duplicate_table_identifiers(self):
+        RestaurantTable.objects.create(identifier='Booth 1', capacity=4)
+
+        duplicate = RestaurantTable(identifier='Booth 1', capacity=6)
+        with self.assertRaises(ValidationError) as context:
+            duplicate.full_clean()
+
+        self.assertIn('identifier', context.exception.message_dict)
+        with self.assertRaises(IntegrityError):
+            RestaurantTable.objects.create(identifier='Booth 1', capacity=6)
 
 
 class WorkerAuthorizationTests(TestCase):

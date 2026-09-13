@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.core.validators import MinValueValidator
 
 # Fixed primary key used to enforce the RestaurantSettings singleton.
 #
@@ -107,3 +108,27 @@ class WorkerProfile(models.Model):
 
     def __str__(self):
         return f'{self.user} ({self.get_role_display()})'
+
+
+class RestaurantTable(models.Model):
+    """Physical table available for guest seating."""
+
+    class Status(models.TextChoices):
+        FREE = 'free', 'Free'
+        RESERVED = 'reserved', 'Reserved'
+        OCCUPIED = 'occupied', 'Occupied'
+        CLEANING = 'cleaning', 'Cleaning'
+
+    identifier = models.CharField(max_length=80, unique=True)
+    capacity = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.FREE,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.identifier} ({self.capacity})'
