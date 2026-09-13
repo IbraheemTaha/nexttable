@@ -1,4 +1,9 @@
+from datetime import datetime
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
+
 from django.test import TestCase
+from django.test import override_settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
@@ -6,6 +11,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .auth import user_is_manager, user_is_staff_or_manager
+from .check_in_tokens import (
+    get_current_check_in_token,
+    is_valid_check_in_token,
+)
 from .models import (
     SINGLETON_PK,
     RestaurantSettings,
@@ -13,6 +22,98 @@ from .models import (
     WaitlistEntry,
     WorkerProfile,
 )
+
+
+class CheckInTokenTests(TestCase):
+    def test_token_is_stable_for_same_restaurant_day(self):
+        restaurant_day = timezone.datetime(2026, 9, 13).date()
+
+        first_token = get_current_check_in_token(for_date=restaurant_day)
+        second_token = get_current_check_in_token(for_date=restaurant_day)
+
+        self.assertEqual(first_token, second_token)
+
+    def test_token_changes_for_next_restaurant_day(self):
+        first_day = timezone.datetime(2026, 9, 13).date()
+        next_day = timezone.datetime(2026, 9, 14).date()
+
+        first_token = get_current_check_in_token(for_date=first_day)
+        next_token = get_current_check_in_token(for_date=next_day)
+
+        self.assertNotEqual(first_token, next_token)
+
+    def test_token_is_not_raw_date_or_sequential_value(self):
+        restaurant_day = timezone.datetime(2026, 9, 13).date()
+
+        token = get_current_check_in_token(for_date=restaurant_day)
+
+        self.assertNotEqual(token, restaurant_day.isoformat())
+        self.assertNotEqual(token, str(restaurant_day.toordinal()))
+        self.assertGreaterEqual(len(token), 24)
+
+    def test_current_token_validates(self):
+        restaurant_day = timezone.datetime(2026, 9, 13).date()
+        token = get_current_check_in_token(for_date=restaurant_day)
+
+        self.assertTrue(
+            is_valid_check_in_token(token, for_date=restaurant_day)
+        )
+
+    def test_previous_day_token_is_rejected(self):
+        previous_day = timezone.datetime(2026, 9, 12).date()
+        current_day = timezone.datetime(2026, 9, 13).date()
+        old_token = get_current_check_in_token(for_date=previous_day)
+
+        self.assertFalse(
+            is_valid_check_in_token(old_token, for_date=current_day)
+        )
+
+    def test_missing_blank_malformed_and_random_tokens_are_rejected(self):
+        restaurant_day = timezone.datetime(2026, 9, 13).date()
+
+        invalid_tokens = [None, '', '   ', 'not-a-real-token', object()]
+        for token in invalid_tokens:
+            with self.subTest(token=repr(token)):
+                self.assertFalse(
+                    is_valid_check_in_token(token, for_date=restaurant_day)
+                )
+
+    @override_settings(SECRET_KEY='first-test-secret')
+    def test_token_depends_on_server_side_secret(self):
+        restaurant_day = timezone.datetime(2026, 9, 13).date()
+
+        first_secret_token = get_current_check_in_token(
+            for_date=restaurant_day
+        )
+        with override_settings(SECRET_KEY='second-test-secret'):
+            second_secret_token = get_current_check_in_token(
+                for_date=restaurant_day
+            )
+
+        self.assertNotEqual(first_secret_token, second_secret_token)
+
+    @override_settings(TIME_ZONE='Europe/Copenhagen')
+    def test_current_token_uses_configured_local_date(self):
+        utc_instant = datetime(
+            2026,
+            9,
+            13,
+            22,
+            30,
+            tzinfo=ZoneInfo('UTC'),
+        )
+        copenhagen_day = timezone.datetime(2026, 9, 14).date()
+
+        with timezone.override('Europe/Copenhagen'):
+            local_day = timezone.localtime(utc_instant).date()
+            with patch('django.utils.timezone.now', return_value=utc_instant):
+                token = get_current_check_in_token()
+
+        self.assertEqual(local_day, copenhagen_day)
+        self.assertEqual(
+            token,
+            get_current_check_in_token(for_date=copenhagen_day),
+        )
 
 
 class RestaurantSettingsGetActiveTests(TestCase):
