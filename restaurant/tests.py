@@ -25,6 +25,8 @@ from .models import (
 )
 from .services import (
     InvalidStatusTransitionError,
+    ManualAssignmentError,
+    assign_table_manually,
     calculate_estimated_wait_minutes,
     check_table_compatibility,
     mark_guest_arrived,
@@ -3923,3 +3925,236 @@ class TableStatusActionViewTests(TestCase):
         self.assertEqual(table.status, RestaurantTable.Status.RESERVED)
         self.assertEqual(entry.status, WaitlistEntry.Status.NOTIFIED)
         self.assertEqual(entry.assigned_table, table)
+
+
+class AssignTableManuallyServiceTests(TestCase):
+
+    def setUp(self):
+        self.table = RestaurantTable.objects.create(
+            identifier='MANUAL-1', capacity=4,
+            status=RestaurantTable.Status.FREE,
+        )
+        self.entry = WaitlistEntry.objects.create(
+            guest_name='Alice',
+            party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=timezone.now(),
+        )
+
+    def test_type_checking_rejects_non_table_argument(self):
+        with self.assertRaises(TypeError):
+            assign_table_manually('not-a-table', self.entry)
+
+    def test_type_checking_rejects_non_waitlist_entry_argument(self):
+        with self.assertRaises(TypeError):
+            assign_table_manually(self.table, 'not-an-entry')
+
+    def test_successful_assignment_from_waiting(self):
+        result = assign_table_manually(self.table, self.entry)
+
+        self.assertEqual(result.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertEqual(result.assigned_table, self.table)
+        self.assertIsNotNone(result.notified_at)
+        self.table.refresh_from_db()
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+
+    def test_successful_assignment_from_late_demoted(self):
+        self.entry.status = WaitlistEntry.Status.LATE_DEMOTED
+        self.entry.save(update_fields=['status'])
+
+        result = assign_table_manually(self.table, self.entry)
+
+        self.assertEqual(result.status, WaitlistEntry.Status.NOTIFIED)
+        self.table.refresh_from_db()
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+
+    def test_reassignment_frees_previous_table(self):
+        previous_table = RestaurantTable.objects.create(
+            identifier='OLD-TABLE', capacity=4,
+            status=RestaurantTable.Status.RESERVED,
+        )
+        self.entry.assigned_table = previous_table
+        self.entry.status = WaitlistEntry.Status.LATE_DEMOTED
+        self.entry.save(update_fields=['assigned_table', 'status'])
+
+        result = assign_table_manually(self.table, self.entry)
+
+        self.assertEqual(result.assigned_table, self.table)
+        previous_table.refresh_from_db()
+        self.assertEqual(previous_table.status, RestaurantTable.Status.FREE)
+        self.table.refresh_from_db()
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+
+    def test_rejected_when_guest_not_waiting_or_late_demoted(self):
+        self.entry.status = WaitlistEntry.Status.ARRIVED
+        self.entry.save(update_fields=['status'])
+
+        with self.assertRaises(ManualAssignmentError):
+            assign_table_manually(self.table, self.entry)
+
+        self.entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertIsNone(self.entry.assigned_table)
+        self.assertEqual(self.table.status, RestaurantTable.Status.FREE)
+
+    def test_rejected_when_table_not_free(self):
+        self.table.status = RestaurantTable.Status.OCCUPIED
+        self.table.save(update_fields=['status'])
+
+        with self.assertRaises(ManualAssignmentError):
+            assign_table_manually(self.table, self.entry)
+
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.assigned_table)
+        self.assertEqual(self.entry.status, WaitlistEntry.Status.WAITING)
+
+    def test_rejected_when_table_capacity_too_small(self):
+        self.entry.party_size = 6
+        self.entry.save(update_fields=['party_size'])
+
+        with self.assertRaises(ManualAssignmentError):
+            assign_table_manually(self.table, self.entry)
+
+        self.entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertIsNone(self.entry.assigned_table)
+        self.assertEqual(self.table.status, RestaurantTable.Status.FREE)
+
+    def test_incompatible_preferences_are_not_enforced(self):
+        # Location preference mismatch (which check_table_compatibility
+        # would reject) is allowed under a manual staff override, as
+        # long as capacity is sufficient.
+        self.table.location = RestaurantTable.Location.OUTDOOR
+        self.table.save(update_fields=['location'])
+        self.entry.preference_notes = 'Indoor/outdoor preference: indoor'
+        self.entry.save(update_fields=['preference_notes'])
+
+        self.assertFalse(check_table_compatibility(self.table, self.entry))
+
+        result = assign_table_manually(self.table, self.entry)
+
+        self.assertEqual(result.assigned_table, self.table)
+
+
+class ManualTableAssignmentViewTests(TestCase):
+    """Tests for the manual table assignment override view (#24)."""
+
+    password = 'usable-test-password-123'
+
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.staff_user = user_model.objects.create_user(
+            username='manual-assign-staff',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.staff_user,
+            role=WorkerProfile.Role.STAFF,
+        )
+        cls.manager_user = user_model.objects.create_user(
+            username='manual-assign-manager',
+            password=cls.password,
+        )
+        WorkerProfile.objects.create(
+            user=cls.manager_user,
+            role=WorkerProfile.Role.MANAGER,
+        )
+        cls.no_role_user = user_model.objects.create_user(
+            username='manual-assign-plain',
+            password=cls.password,
+        )
+
+    def setUp(self):
+        WaitlistEntry.objects.all().delete()
+        RestaurantTable.objects.all().delete()
+        self.table = RestaurantTable.objects.create(
+            identifier='VIEW-MANUAL-1', capacity=4,
+            status=RestaurantTable.Status.FREE,
+        )
+        self.entry = WaitlistEntry.objects.create(
+            guest_name='Carol',
+            party_size=2,
+            status=WaitlistEntry.Status.WAITING,
+            checked_in_at=timezone.now(),
+        )
+
+    def _url(self):
+        return reverse('restaurant:manual_table_assignment')
+
+    def _post(self, **overrides):
+        data = {'entry_id': self.entry.pk, 'table_id': self.table.pk}
+        data.update(overrides)
+        return self.client.post(self._url(), data)
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        response = self._post()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.assigned_table)
+
+    def test_no_role_user_is_denied(self):
+        self.client.force_login(self.no_role_user)
+
+        response = self._post()
+
+        self.assertEqual(response.status_code, 403)
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.assigned_table)
+
+    def test_staff_user_can_manually_assign_table(self):
+        self.client.force_login(self.staff_user)
+
+        response = self._post()
+
+        self.assertRedirects(response, reverse('restaurant:waitlist'))
+        self.entry.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(self.entry.assigned_table, self.table)
+        self.assertEqual(self.entry.status, WaitlistEntry.Status.NOTIFIED)
+        self.assertEqual(self.table.status, RestaurantTable.Status.RESERVED)
+
+    def test_manager_user_can_manually_assign_table(self):
+        self.client.force_login(self.manager_user)
+
+        response = self._post()
+
+        self.assertRedirects(response, reverse('restaurant:waitlist'))
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.assigned_table, self.table)
+
+    def test_redirects_to_table_status_when_next_is_table_status(self):
+        self.client.force_login(self.staff_user)
+
+        response = self._post(next='table_status')
+
+        self.assertRedirects(response, reverse('restaurant:table_status'))
+
+    def test_invalid_assignment_shows_error_and_does_not_change_state(self):
+        self.client.force_login(self.staff_user)
+        self.table.status = RestaurantTable.Status.OCCUPIED
+        self.table.save(update_fields=['status'])
+
+        response = self.client.post(
+            self._url(),
+            {'entry_id': self.entry.pk, 'table_id': self.table.pk},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.assigned_table)
+        messages_list = list(response.context['messages'])
+        self.assertTrue(any(
+            'not free' in str(message) for message in messages_list
+        ))
+
+    def test_get_request_does_not_mutate_state(self):
+        self.client.force_login(self.staff_user)
+
+        self.client.get(self._url())
+
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.assigned_table)

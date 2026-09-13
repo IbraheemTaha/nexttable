@@ -25,6 +25,8 @@ from .models import (
 )
 from .services import (
     InvalidStatusTransitionError,
+    ManualAssignmentError,
+    assign_table_manually,
     mark_guest_arrived,
     mark_guest_cancelled,
     mark_guest_left,
@@ -75,12 +77,22 @@ def waitlist(request):
         .order_by('is_priority', 'checked_in_at')
     )
 
+    free_tables = RestaurantTable.objects.filter(
+        status=RestaurantTable.Status.FREE
+    ).order_by('identifier')
+
+    eligible_entries = [
+        entry for entry in entries if entry.status in PRIORITY_WAITLIST_STATUSES
+    ]
+
     return render(
         request,
         'restaurant/waitlist.html',
         {
             'entries': entries,
             'status_filter': status_filter,
+            'free_tables': free_tables,
+            'eligible_entries': eligible_entries,
         },
     )
 
@@ -108,6 +120,22 @@ def waitlist_entry_action(request, entry_id, action):
         except InvalidStatusTransitionError as exc:
             messages.error(request, str(exc))
 
+    return redirect('restaurant:waitlist')
+
+
+@staff_or_manager_required
+def manual_table_assignment(request):
+    if request.method == 'POST':
+        entry = get_object_or_404(WaitlistEntry, pk=request.POST.get('entry_id'))
+        table = get_object_or_404(RestaurantTable, pk=request.POST.get('table_id'))
+        try:
+            assign_table_manually(table, entry)
+        except ManualAssignmentError as exc:
+            messages.error(request, str(exc))
+
+    next_url = request.POST.get('next') or request.GET.get('next')
+    if next_url == 'table_status':
+        return redirect('restaurant:table_status')
     return redirect('restaurant:waitlist')
 
 
@@ -143,10 +171,25 @@ def table_status(request):
         for status, label in RestaurantTable.Status.choices
     ]
 
+    eligible_entries = (
+        WaitlistEntry.objects.filter(
+            status__in=[
+                WaitlistEntry.Status.WAITING,
+                WaitlistEntry.Status.LATE_DEMOTED,
+            ]
+        )
+        .order_by('checked_in_at')
+    )
+    free_tables = tables_by_status.get(RestaurantTable.Status.FREE, [])
+
     return render(
         request,
         'restaurant/table_status.html',
-        {'status_groups': status_groups},
+        {
+            'status_groups': status_groups,
+            'eligible_entries': eligible_entries,
+            'free_tables': free_tables,
+        },
     )
 
 

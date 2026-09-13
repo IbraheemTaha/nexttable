@@ -166,6 +166,81 @@ class InvalidStatusTransitionError(ValidationError):
     """Raised when a requested WaitlistEntry status transition is not allowed."""
 
 
+class ManualAssignmentError(ValidationError):
+    """Raised when a manual table assignment override cannot be performed."""
+
+
+_MANUAL_ASSIGNMENT_ELIGIBLE_STATUSES = {
+    WaitlistEntry.Status.WAITING,
+    WaitlistEntry.Status.LATE_DEMOTED,
+}
+
+
+def assign_table_manually(table, waitlist_entry):
+    """Manually assign (or reassign) a specific table to a waiting guest.
+
+    This overrides automatic matching (see `match_table_automatically`),
+    allowing staff to pick a specific table/guest pair. Table
+    compatibility preferences (see `check_table_compatibility`) are not
+    strictly enforced, but under-capacity assignments are always
+    rejected.
+
+    Args:
+        table: RestaurantTable instance to assign.
+        waitlist_entry: WaitlistEntry instance to assign the table to.
+
+    Returns:
+        The updated WaitlistEntry instance.
+
+    Raises:
+        TypeError: If arguments are not the expected model instances.
+        ManualAssignmentError: If the guest is not in an eligible
+            status, the table is not free, or the table's capacity is
+            too small for the guest's party size.
+    """
+    if not isinstance(table, RestaurantTable):
+        raise TypeError('table must be a RestaurantTable instance')
+    if not isinstance(waitlist_entry, WaitlistEntry):
+        raise TypeError('waitlist_entry must be a WaitlistEntry instance')
+
+    if waitlist_entry.status not in _MANUAL_ASSIGNMENT_ELIGIBLE_STATUSES:
+        raise ManualAssignmentError(
+            f'Cannot manually assign a table to a guest with status '
+            f'"{waitlist_entry.status}". Guest must be waiting or '
+            f'late_demoted.'
+        )
+
+    if table.status != RestaurantTable.Status.FREE:
+        raise ManualAssignmentError(
+            f'Cannot manually assign table "{table.identifier}" because '
+            f'it is not free (current status: "{table.status}").'
+        )
+
+    if waitlist_entry.party_size > table.capacity:
+        raise ManualAssignmentError(
+            f'Table "{table.identifier}" (capacity {table.capacity}) is '
+            f'too small for a party of {waitlist_entry.party_size}.'
+        )
+
+    with transaction.atomic():
+        previous_table = waitlist_entry.assigned_table
+        if previous_table is not None and previous_table.pk != table.pk:
+            previous_table.status = RestaurantTable.Status.FREE
+            previous_table.save(update_fields=['status', 'updated_at'])
+
+        waitlist_entry.assigned_table = table
+        waitlist_entry.status = WaitlistEntry.Status.NOTIFIED
+        waitlist_entry.notified_at = timezone.now()
+        waitlist_entry.save(
+            update_fields=['assigned_table', 'status', 'notified_at', 'updated_at']
+        )
+
+        table.status = RestaurantTable.Status.RESERVED
+        table.save(update_fields=['status', 'updated_at'])
+
+    return waitlist_entry
+
+
 # Maps each manual table-status transition target to the set of statuses
 # it may be entered from via `set_table_status`.
 _ALLOWED_TABLE_TRANSITIONS = {

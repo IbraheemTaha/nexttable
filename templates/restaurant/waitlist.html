@@ -30,6 +30,33 @@
     </a>
 </nav>
 
+{% if eligible_entries and free_tables %}
+<section id="manual-table-assignment" class="mt-6">
+    <h2 class="text-lg font-semibold">Manually assign a table</h2>
+    <form method="post" action="{% url 'restaurant:manual_table_assignment' %}" class="mt-2 flex gap-2 items-end">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="waitlist">
+        <label>
+            Guest
+            <select name="entry_id" id="manual-assign-entry">
+                {% for entry in eligible_entries %}
+                <option value="{{ entry.pk }}">{{ entry.guest_name }} (party of {{ entry.party_size }})</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Table
+            <select name="table_id" id="manual-assign-table">
+                {% for table in free_tables %}
+                <option value="{{ table.pk }}">{{ table.identifier }} (capacity {{ table.capacity }})</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit" id="manual-assign-submit">Assign table</button>
+    </form>
+</section>
+{% endif %}
+
 <table class="mt-4 w-full text-left">
     <thead>
         <tr>
